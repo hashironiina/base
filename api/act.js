@@ -38,6 +38,18 @@ module.exports = async (req, res) => {
       if (Number(d.telegram_id) === me.telegram_id) throw new Error('Нельзя удалить себя');
       chk(await db.from('users').delete().eq('telegram_id', d.telegram_id));
     }
+    else if (action === 'progress') {
+      // Кто какие статьи открывал (только бариста с ролью «читает»)
+      out.users = chk(await db.from('users').select('telegram_id,name').eq('role', 'reader').order('name')).data;
+      out.articles = chk(await db.from('articles').select('id,title').order('section_id').order('sort_order').order('id')).data;
+      let reads = [];
+      for (let i = 0; ; i += 1000) {
+        const x = chk(await db.from('reads').select('telegram_id,article_id').range(i, i + 999)).data;
+        reads = reads.concat(x);
+        if (x.length < 1000) break;
+      }
+      out.reads = reads;
+    }
     else return res.status(400).json({ error: 'bad_action' });
 
     res.json(out);
