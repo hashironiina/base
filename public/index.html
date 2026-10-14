@@ -16,7 +16,7 @@ button.sec{background:var(--card);color:var(--tx)}button.danger{background:#d945
 .hint{color:var(--hint)}.body{white-space:pre-wrap;margin:10px 0}
 img{max-width:100%;border-radius:12px;margin:8px 0;display:block}
 </style></head>
-<body><div id="app">Загрузка…</div>
+<body><div id="app">Подождите, идёт загрузка…</div>
 <script>
 const tg=Telegram.WebApp;tg.ready();tg.expand();
 const $=document.getElementById('app');
@@ -35,7 +35,7 @@ tg.BackButton.onClick(()=>{view={t:'list'};render()});
 async function load(){
   try{D=await api('/api/data')}catch(e){
     const id=tg.initDataUnsafe?.user?.id||'';
-    $.innerHTML=`<h2>Нет доступа</h2><p>Попроси шеф-баристу добавить тебя в список.</p><p class=hint>Твой Telegram ID: ${id}</p>`;return;
+    $.innerHTML=`<h2>Нет доступа</h2><p>Попроси шеф-баристу добавить тебя в список.</p><p class=hint>Твой Telegram ID (отправь его шеф-бариста): ${id}</p>`;return;
   }
   render();
 }
