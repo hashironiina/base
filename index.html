@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>База знаний</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:var(--tg-theme-bg-color,#fff);--tx:var(--tg-theme-text-color,#222);--hint:var(--tg-theme-hint-color,#888);--btn:var(--tg-theme-button-color,#2a7de1);--btx:var(--tg-theme-button-text-color,#fff);--card:var(--tg-theme-secondary-bg-color,#f1f1f1)}
+*{box-sizing:border-box}
+body{margin:0;padding:14px;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,sans-serif}
+h2{margin:6px 0 10px}h3{margin:18px 0 8px}
+input,select,textarea{width:100%;padding:11px;margin:5px 0;border:1px solid var(--card);border-radius:10px;background:var(--card);color:var(--tx);font:inherit}
+button{padding:10px 14px;border:0;border-radius:10px;background:var(--btn);color:var(--btx);font:inherit;cursor:pointer}
+button.sec{background:var(--card);color:var(--tx)}button.danger{background:#d9453b;color:#fff}
+.row{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}.row input{flex:1;margin:0}
+.card{padding:13px;margin:6px 0;border-radius:12px;background:var(--card);cursor:pointer}
+.hint{color:var(--hint)}.body{white-space:pre-wrap;margin:10px 0}
+img{max-width:100%;border-radius:12px;margin:8px 0;display:block}
+</style></head>
+<body><div id="app">Загрузка…</div>
+<script>
+const tg=Telegram.WebApp;tg.ready();tg.expand();
+const $=document.getElementById('app');
+let D,E,q='',view={t:'list'};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(url,body){
+  const r=await fetch(url,{method:body?'POST':'GET',headers:{'x-init-data':tg.initData,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.error||r.status);
+  return j;
+}
+const act=async b=>{try{return await api('/api/act',b)}catch(e){tg.showAlert('Ошибка: '+e.message);throw e}};
+const go=t=>{view={t};render()};
+tg.BackButton.onClick(()=>{view={t:'list'};render()});
+
+async function load(){
+  try{D=await api('/api/data')}catch(e){
+    const id=tg.initDataUnsafe?.user?.id||'';
+    $.innerHTML=`<h2>Нет доступа</h2><p>Попроси шеф-баристу добавить тебя в список.</p><p class=hint>Твой Telegram ID: ${id}</p>`;return;
+  }
+  render();
+}
+function render(){
+  const m=D.me.role==='admin';
+  view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users})[view.t]();
+}
+
+function list(m){
+  $.innerHTML=`<input placeholder="Поиск" value="${esc(q)}" oninput="q=this.value;results()">`+
+    (m?`<div class=row><button onclick="newArt()">+ Статья</button><button class=sec onclick="go('sections')">Разделы</button><button class=sec onclick="go('users')">Люди</button></div>`:'')+
+    '<div id=res></div>';
+  results();
+}
+function results(){
+  const k=q.trim().toLowerCase();let h='';
+  for(const s of D.sections){
+    const as=D.articles.filter(a=>a.section_id===s.id&&(!k||(a.title+' '+a.body).toLowerCase().includes(k)));
+    if(k&&!as.length)continue;
+    h+=`<h3>${esc(s.title)}</h3>`+(as.map(a=>`<div class=card onclick="openA(${a.id})">${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}</div>`).join('')||'<p class=hint>Пока пусто</p>');
+  }
+  document.getElementById('res').innerHTML=h||'<p class=hint>Ничего не найдено</p>';
+}
+
+function openA(id){
+  if(!D.read.includes(id)){D.read.push(id);api('/api/act',{action:'read',article_id:id}).catch(()=>{})}
+  view={t:'article',id};render();
+}
+function article(m){
+  const a=D.articles.find(x=>x.id===view.id);
+  $.innerHTML=`<h2>${esc(a.title)}</h2><div class=body>${esc(a.body)}</div>`+
+    a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+
+    (m?`<div class=row><button onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
+}
+
+function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],prev:{}};view={t:'edit'};render()}
+function editA(id){
+  const a=D.articles.find(x=>x.id===id);
+  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],prev:{}};
+  a.images.forEach((n,i)=>E.prev[n]=a.imageUrls[i]);
+  view={t:'edit'};render();
+}
+function edit(){
+  $.innerHTML=`<h2>${E.id?'Изменить':'Новая статья'}</h2>
+  <select onchange="E.section_id=+this.value">${D.sections.map(s=>`<option value=${s.id} ${s.id===E.section_id?'selected':''}>${esc(s.title)}</option>`).join('')}</select>
+  <input placeholder="Название" value="${esc(E.title)}" oninput="E.title=this.value">
+  <textarea rows=12 placeholder="Текст" oninput="E.body=this.value">${esc(E.body)}</textarea>
+  ${E.images.map((n,i)=>`<div><img src="${E.prev[n]||''}"><button class=danger onclick="E.images.splice(${i},1);edit()">Убрать фото</button></div>`).join('')}
+  <p class=hint>Добавить фото:</p><input type=file accept="image/*" multiple onchange="addImgs(this.files)">
+  <div class=row><button onclick="saveA()">Сохранить</button></div>`;
+}
+function shrink(f){return new Promise(r=>{const i=new Image();i.onload=()=>{const k=Math.min(1,1200/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*k;c.height=i.height*k;c.getContext('2d').drawImage(i,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.8))};i.src=URL.createObjectURL(f)})}
+async function addImgs(files){
+  for(const f of files){
+    const u=await shrink(f);
+    const {name}=await act({action:'upload',data:u.split(',')[1]});
+    E.images.push(name);E.prev[name]=u;
+  }
+  edit();
+}
+async function saveA(){
+  if(!E.title.trim())return tg.showAlert('Впиши название');
+  await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images});
+  view={t:'list'};await load();
+}
+function delA(id){tg.showConfirm('Удалить статью?',async ok=>{if(!ok)return;await act({action:'deleteArticle',id});view={t:'list'};load()})}
+
+function sections(){
+  $.innerHTML='<h2>Разделы</h2>'+D.sections.map(s=>`<div class=row><input id=s${s.id} value="${esc(s.title)}"><button onclick="saveS(${s.id},${s.sort_order})">OK</button><button class=danger onclick="delS(${s.id})">✕</button></div>`).join('')+
+  `<h3>Новый раздел</h3><div class=row><input id=sn placeholder="Название"><button onclick="saveS(0,${D.sections.length+1})">Добавить</button></div><p class=hint>При удалении раздела удаляются и все его статьи.</p>`;
+}
+async function saveS(id,so){
+  const v=document.getElementById(id?'s'+id:'sn').value.trim();if(!v)return;
+  await act({action:'saveSection',id:id||undefined,title:v,sort_order:so});await load();
+}
+function delS(id){tg.showConfirm('Удалить раздел вместе со статьями?',async ok=>{if(!ok)return;await act({action:'deleteSection',id});await load()})}
+
+async function users(){
+  $.innerHTML='Загрузка…';
+  const {users:U}=await act({action:'listUsers'});
+  $.innerHTML='<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${u.role==='admin'?'редактор':'читает'}<br><small class=hint>${u.telegram_id}</small></span><button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
+  `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=admin>Редактор</option></select><div class=row><button onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
+}
+async function addU(){
+  const n=un.value.trim(),i=ui.value.trim();
+  if(!n||!/^\d+$/.test(i))return tg.showAlert('Нужны имя и ID из цифр');
+  await act({action:'saveUser',name:n,telegram_id:i,role:ur.value});users();
+}
+function delU(id){tg.showConfirm('Убрать доступ?',async ok=>{if(!ok)return;await act({action:'deleteUser',telegram_id:id});users()})}
+
+load();
+</script></body></html>
