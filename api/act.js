@@ -1,41 +1,61 @@
 const { db, auth } = require('./_lib');
-
-// Какие уровни доступа видит каждая роль
-const VISIBLE = {
-  admin: ['staff', 'partners', 'all'],
-  reader: ['staff', 'all'],
-  partner: ['partners', 'all'],
-};
+const chk = (r) => { if (r.error) throw r.error; return r; };
 
 module.exports = async (req, res) => {
   const me = await auth(req);
   if (!me) return res.status(403).json({ error: 'no_access' });
-  const levels = VISIBLE[me.role] || ['all'];
+  const { action, ...d } = req.body || {};
 
-  const [s, a, r] = await Promise.all([
-    db.from('sections').select('*').order('sort_order'),
-    db.from('articles').select('*').in('access', levels).order('sort_order').order('id'),
-    db.from('reads').select('article_id').eq('telegram_id', me.telegram_id),
-  ]);
+  try {
+    // Отметка «прочитано» доступна всем из списка
+    if (action === 'read') {
+      chk(await db.from('reads').upsert({ telegram_id: me.telegram_id, article_id: d.article_id }));
+      return res.json({ ok: 1 });
+    }
+    // Всё остальное только для редакторов
+    if (me.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
 
-  const articles = a.data || [];
-  // Не-редакторам показываем только разделы, где для них есть статьи
-  const sections = (s.data || []).filter(
-    (x) => me.role === 'admin' || articles.some((y) => y.section_id === x.id)
-  );
+    const out = { ok: 1 };
+    const save = (t, o) => (d.id ? db.from(t).update(o).eq('id', d.id) : db.from(t).insert(o));
 
-  // Картинки лежат в закрытом хранилище, выдаём временные ссылки на 1 час
-  const names = [...new Set(articles.flatMap((x) => x.images))];
-  const urls = {};
-  if (names.length) {
-    const { data } = await db.storage.from('images').createSignedUrls(names, 3600);
-    (data || []).forEach((d) => { urls[d.path] = d.signedUrl; });
+    if (action === 'saveSection') chk(await save('sections', { title: d.title, sort_order: d.sort_order || 0 }));
+    else if (action === 'deleteSection') chk(await db.from('sections').delete().eq('id', d.id));
+    else if (action === 'saveArticle') chk(await save('articles', {
+      section_id: d.section_id, title: d.title, body: d.body || '', images: d.images || [],
+      access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
+      updated_at: new Date().toISOString(), updated_by: me.telegram_id,
+    }));
+    else if (action === 'deleteArticle') chk(await db.from('articles').delete().eq('id', d.id));
+    else if (action === 'upload') {
+      const name = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.jpg';
+      chk(await db.storage.from('images').upload(name, Buffer.from(d.data, 'base64'), { contentType: 'image/jpeg' }));
+      out.name = name;
+    }
+    else if (action === 'listUsers') out.users = chk(await db.from('users').select('*').order('name')).data;
+    else if (action === 'saveUser') chk(await db.from('users').upsert({
+      telegram_id: Number(d.telegram_id), name: d.name,
+      role: ['admin', 'partner'].includes(d.role) ? d.role : 'reader',
+    }));
+    else if (action === 'deleteUser') {
+      if (Number(d.telegram_id) === me.telegram_id) throw new Error('Нельзя удалить себя');
+      chk(await db.from('users').delete().eq('telegram_id', d.telegram_id));
+    }
+    else if (action === 'progress') {
+      // Кто какие статьи открывал: только бариста («читает») и только статьи для бариста
+      out.users = chk(await db.from('users').select('telegram_id,name').eq('role', 'reader').order('name')).data;
+      out.articles = chk(await db.from('articles').select('id,title').in('access', ['staff', 'all']).order('section_id').order('sort_order').order('id')).data;
+      let reads = [];
+      for (let i = 0; ; i += 1000) {
+        const x = chk(await db.from('reads').select('telegram_id,article_id').range(i, i + 999)).data;
+        reads = reads.concat(x);
+        if (x.length < 1000) break;
+      }
+      out.reads = reads;
+    }
+    else return res.status(400).json({ error: 'bad_action' });
+
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'error' });
   }
-
-  res.json({
-    me: { id: me.telegram_id, name: me.name, role: me.role },
-    sections,
-    articles: articles.map((x) => ({ ...x, imageUrls: x.images.map((n) => urls[n] || '') })),
-    read: (r.data || []).map((x) => x.article_id),
-  });
 };
