@@ -22,6 +22,7 @@ module.exports = async (req, res) => {
     else if (action === 'deleteSection') chk(await db.from('sections').delete().eq('id', d.id));
     else if (action === 'saveArticle') chk(await save('articles', {
       section_id: d.section_id, title: d.title, body: d.body || '', images: d.images || [],
+      access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
       updated_at: new Date().toISOString(), updated_by: me.telegram_id,
     }));
     else if (action === 'deleteArticle') chk(await db.from('articles').delete().eq('id', d.id));
@@ -32,16 +33,17 @@ module.exports = async (req, res) => {
     }
     else if (action === 'listUsers') out.users = chk(await db.from('users').select('*').order('name')).data;
     else if (action === 'saveUser') chk(await db.from('users').upsert({
-      telegram_id: Number(d.telegram_id), name: d.name, role: d.role === 'admin' ? 'admin' : 'reader',
+      telegram_id: Number(d.telegram_id), name: d.name,
+      role: ['admin', 'partner'].includes(d.role) ? d.role : 'reader',
     }));
     else if (action === 'deleteUser') {
       if (Number(d.telegram_id) === me.telegram_id) throw new Error('Нельзя удалить себя');
       chk(await db.from('users').delete().eq('telegram_id', d.telegram_id));
     }
     else if (action === 'progress') {
-      // Кто какие статьи открывал (только бариста с ролью «читает»)
+      // Кто какие статьи открывал: только бариста («читает») и только статьи для бариста
       out.users = chk(await db.from('users').select('telegram_id,name').eq('role', 'reader').order('name')).data;
-      out.articles = chk(await db.from('articles').select('id,title').order('section_id').order('sort_order').order('id')).data;
+      out.articles = chk(await db.from('articles').select('id,title').in('access', ['staff', 'all']).order('section_id').order('sort_order').order('id')).data;
       let reads = [];
       for (let i = 0; ; i += 1000) {
         const x = chk(await db.from('reads').select('telegram_id,article_id').range(i, i + 999)).data;
