@@ -20,7 +20,7 @@ img{max-width:100%;border-radius:12px;margin:8px 0;display:block}
 <script>
 const tg=Telegram.WebApp;tg.ready();tg.expand();
 const $=document.getElementById('app');
-let D,E,q='',view={t:'list'};
+let D,E,PR,q='',view={t:'list'};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(url,body){
   const r=await fetch(url,{method:body?'POST':'GET',headers:{'x-init-data':tg.initData,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
@@ -42,12 +42,12 @@ async function load(){
 function render(){
   const m=D.me.role==='admin';
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress})[view.t]();
 }
 
 function list(m){
   $.innerHTML=`<input placeholder="Поиск" value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button onclick="newArt()">+ Статья</button><button class=sec onclick="go('sections')">Разделы</button><button class=sec onclick="go('users')">Люди</button></div>`:'')+
+    (m?`<div class=row><button onclick="newArt()">+ Статья</button><button class=sec onclick="go('sections')">Разделы</button><button class=sec onclick="go('users')">Люди</button><button class=sec onclick="go('progress')">Прогресс</button></div>`:'')+
     '<div id=res></div>';
   results();
 }
@@ -126,6 +126,32 @@ async function addU(){
   await act({action:'saveUser',name:n,telegram_id:i,role:ur.value});users();
 }
 function delU(id){tg.showConfirm('Убрать доступ?',async ok=>{if(!ok)return;await act({action:'deleteUser',telegram_id:id});users()})}
+
+// ===== Кто что прочитал (только для редактора) =====
+async function progress(){
+  $.innerHTML='Загрузка…';
+  const P=await act({action:'progress'});
+  const by={},cnt={},ids=new Set(P.users.map(u=>u.telegram_id));
+  P.reads.forEach(r=>{
+    (by[r.telegram_id]=by[r.telegram_id]||new Set()).add(r.article_id);
+    if(ids.has(r.telegram_id))cnt[r.article_id]=(cnt[r.article_id]||0)+1;
+  });
+  PR={P,by};
+  const total=P.articles.length;
+  const rows=P.users.map(u=>({u,n:P.articles.filter(a=>(by[u.telegram_id]||new Set()).has(a.id)).length})).sort((a,b)=>a.n-b.n);
+  $.innerHTML='<h2>Кто что прочитал</h2><p class=hint>«Прочитано» значит «открыл статью». Нажми на имя, чтобы увидеть, что не открыто.</p>'+
+    (rows.map(({u,n})=>`<div class=card onclick="toggleP(${u.telegram_id})"><b>${esc(u.name)}</b> — ${n} из ${total} (${total?Math.round(n/total*100):0}%)<div id="p${u.telegram_id}" style="display:none"></div></div>`).join('')||'<p class=hint>Пока нет бариста в списке (роль «читает»).</p>')+
+    '<h3>По статьям</h3>'+
+    P.articles.map(a=>`<div class=card style="cursor:default">${esc(a.title)}<br><small class=hint>открыли ${cnt[a.id]||0} из ${P.users.length}</small></div>`).join('');
+}
+function toggleP(id){
+  const el=document.getElementById('p'+id);
+  if(el.style.display==='block'){el.style.display='none';return}
+  const s=PR.by[id]||new Set();
+  const no=PR.P.articles.filter(a=>!s.has(a.id));
+  el.innerHTML='<p class=hint>Не открывал:</p>'+(no.length?no.map(a=>'<div>• '+esc(a.title)+'</div>').join(''):'<div>всё открыл ✓</div>');
+  el.style.display='block';
+}
 
 load();
 </script></body></html>
