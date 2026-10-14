@@ -56,7 +56,7 @@ function results(){
   for(const s of D.sections){
     const as=D.articles.filter(a=>a.section_id===s.id&&(!k||(a.title+' '+a.body).toLowerCase().includes(k)));
     if(k&&!as.length)continue;
-    h+=`<h3>${esc(s.title)}</h3>`+(as.map(a=>`<div class=card onclick="openA(${a.id})">${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}</div>`).join('')||'<p class=hint>Пока пусто</p>');
+    h+=`<h3>${esc(s.title)}</h3>`+(as.map(a=>`<div class=card onclick="openA(${a.id})">${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}${D.me.role==='admin'&&a.access!=='staff'?` <small class=hint>· ${a.access==='partners'?'партнёры':'все'}</small>`:''}</div>`).join('')||'<p class=hint>Пока пусто</p>');
   }
   document.getElementById('res').innerHTML=h||'<p class=hint>Ничего не найдено</p>';
 }
@@ -72,16 +72,17 @@ function article(m){
     (m?`<div class=row><button onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
-function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],prev:{}};view={t:'edit'};render()}
+function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],access:'staff',prev:{}};view={t:'edit'};render()}
 function editA(id){
   const a=D.articles.find(x=>x.id===id);
-  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],prev:{}};
+  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',prev:{}};
   a.images.forEach((n,i)=>E.prev[n]=a.imageUrls[i]);
   view={t:'edit'};render();
 }
 function edit(){
   $.innerHTML=`<h2>${E.id?'Изменить':'Новая статья'}</h2>
   <select onchange="E.section_id=+this.value">${D.sections.map(s=>`<option value=${s.id} ${s.id===E.section_id?'selected':''}>${esc(s.title)}</option>`).join('')}</select>
+  <select onchange="E.access=this.value"><option value=staff ${E.access==='staff'?'selected':''}>Видят: бариста</option><option value=partners ${E.access==='partners'?'selected':''}>Видят: партнёры</option><option value=all ${E.access==='all'?'selected':''}>Видят: все</option></select>
   <input placeholder="Название" value="${esc(E.title)}" oninput="E.title=this.value">
   <textarea rows=12 placeholder="Текст" oninput="E.body=this.value">${esc(E.body)}</textarea>
   ${E.images.map((n,i)=>`<div><img src="${E.prev[n]||''}"><button class=danger onclick="E.images.splice(${i},1);edit()">Убрать фото</button></div>`).join('')}
@@ -99,7 +100,7 @@ async function addImgs(files){
 }
 async function saveA(){
   if(!E.title.trim())return tg.showAlert('Впиши название');
-  await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images});
+  await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images,access:E.access});
   view={t:'list'};await load();
 }
 function delA(id){tg.showConfirm('Удалить статью?',async ok=>{if(!ok)return;await act({action:'deleteArticle',id});view={t:'list'};load()})}
@@ -117,8 +118,8 @@ function delS(id){tg.showConfirm('Удалить раздел вместе со 
 async function users(){
   $.innerHTML='Загрузка…';
   const {users:U}=await act({action:'listUsers'});
-  $.innerHTML='<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${u.role==='admin'?'редактор':'читает'}<br><small class=hint>${u.telegram_id}</small></span><button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
-  `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=admin>Редактор</option></select><div class=row><button onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
+  $.innerHTML='<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${u.role==='admin'?'редактор':u.role==='partner'?'партнёр':'читает'}<br><small class=hint>${u.telegram_id}</small></span><button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
+  `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select><div class=row><button onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
 }
 async function addU(){
   const n=un.value.trim(),i=ui.value.trim();
