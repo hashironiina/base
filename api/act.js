@@ -1,6 +1,30 @@
 const { db, auth } = require('./_lib');
 const chk = (r) => { if (r.error) throw r.error; return r; };
 
+// Отправка сообщения человеку от имени бота (кнопка открывает приложение)
+async function tgSend(chatId, text, appUrl) {
+  const body = { chat_id: chatId, text };
+  if (appUrl) body.reply_markup = { inline_keyboard: [[{ text: 'Открыть базу знаний', web_app: { url: appUrl } }]] };
+  try {
+    const r = await fetch('https://api.telegram.org/bot' + process.env.BOT_TOKEN + '/sendMessage', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    return !!j.ok;
+  } catch (e) { return false; }
+}
+// Рассылка пачками по 15, чтобы не упереться в лимиты Telegram
+async function broadcast(users, text, appUrl) {
+  const failed = [];
+  let sent = 0;
+  for (let i = 0; i < users.length; i += 15) {
+    const part = users.slice(i, i + 15);
+    const rs = await Promise.all(part.map((u) => tgSend(u.telegram_id, text, appUrl)));
+    rs.forEach((ok, k) => { if (ok) sent++; else failed.push(part[k].name); });
+  }
+  return { sent, failed };
+}
+
 // Состояние текущего этапа стажёра: сколько статей, все ли открыты, есть ли тест
 async function stageState(me) {
   const cur = chk(await db.from('articles').select('id').in('access', ['staff', 'all']).eq('stage', me.stage)).data;
@@ -85,7 +109,30 @@ module.exports = async (req, res) => {
           .order('sort_order', { ascending: false }).limit(1)).data;
         row.sort_order = ((mx[0] && mx[0].sort_order) || 0) + 1;
       }
-      chk(await save('articles', row));
+      const r = chk(await save('articles', row).select('id'));
+      out.id = d.id || (r.data[0] && r.data[0].id);
+    }
+    else if (action === 'notify') {
+      // Уведомление в Telegram: об одной статье или свободное сообщение
+      const appUrl = 'https://' + (req.headers['x-forwarded-host'] || req.headers.host);
+      const all = chk(await db.from('users').select('telegram_id,name,role,stage').neq('role', 'admin')).data;
+      let to, text;
+      if (d.article_id) {
+        const a = chk(await db.from('articles').select('title,access,stage,section_id').eq('id', d.article_id)).data[0];
+        if (!a) throw new Error('Статья не найдена');
+        const sec = chk(await db.from('sections').select('title').eq('id', a.section_id)).data[0];
+        const roles = a.access === 'partners' ? ['partner'] : a.access === 'all' ? ['reader', 'trainee', 'partner'] : ['reader', 'trainee'];
+        // Стажёр получает уведомление, только если статья уже открыта на его этапе
+        to = all.filter((u) => roles.includes(u.role) && (u.role !== 'trainee' || (a.stage >= 1 && u.stage >= a.stage)));
+        text = (d.kind === 'new' ? '📚 Новая статья' : '📚 Статья обновлена') + '\n«' + a.title + '»' + (sec ? '\nРаздел: ' + sec.title : '');
+      } else {
+        const set = { all: ['reader', 'trainee', 'partner'], staff: ['reader', 'trainee'], trainees: ['trainee'], partners: ['partner'] }[d.audience] || ['reader', 'trainee'];
+        to = all.filter((u) => set.includes(u.role));
+        text = String(d.text || '').trim();
+        if (!text) throw new Error('Введи текст сообщения');
+      }
+      Object.assign(out, await broadcast(to, text.slice(0, 3500), appUrl));
+      out.total = to.length;
     }
     else if (action === 'reorder') {
       // Новый порядок статей внутри раздела: ids в нужной очерёдности
