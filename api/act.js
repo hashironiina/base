@@ -101,6 +101,10 @@ module.exports = async (req, res) => {
         section_id: d.section_id, title: d.title, body: d.body || '', images: d.images || [],
         access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
         stage: Math.max(0, Math.min(9, Number(d.stage) || 0)),
+        files: (Array.isArray(d.files) ? d.files : [])
+          .filter((f) => f && typeof f.path === 'string' && f.path.startsWith('files/'))
+          .slice(0, 10)
+          .map((f) => ({ path: f.path, title: String(f.title || 'Файл').slice(0, 200), size: Number(f.size) || 0 })),
         updated_at: new Date().toISOString(), updated_by: me.telegram_id,
       };
       // Новая статья встаёт в конец своего раздела
@@ -111,6 +115,24 @@ module.exports = async (req, res) => {
       }
       const r = chk(await save('articles', row).select('id'));
       out.id = d.id || (r.data[0] && r.data[0].id);
+    }
+    else if (action === 'fileUrl') {
+      // Адрес для прямой загрузки файла в хранилище (в обход лимита размера Vercel)
+      const ext = ['.pdf', '.doc', '.docx'].includes(d.ext) ? d.ext : null;
+      if (!ext) throw new Error('Подходят только PDF и Word');
+      const path = 'files/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext;
+      const r = await db.storage.from('images').createSignedUploadUrl(path);
+      if (r.error) throw r.error;
+      out.signedUrl = r.data.signedUrl;
+      out.path = path;
+    }
+    else if (action === 'fileUpload') {
+      // Запасной путь: файл до ~3 МБ через сервер
+      const path = String(d.path || '');
+      const ext = (path.match(/\.(pdf|docx?)$/) || [])[0];
+      if (!path.startsWith('files/') || !ext) throw new Error('Неверный файл');
+      const types = { '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+      chk(await db.storage.from('images').upload(path, Buffer.from(d.data, 'base64'), { contentType: types[ext], upsert: true }));
     }
     else if (action === 'notify') {
       // Уведомление в Telegram: об одной статье или свободное сообщение
