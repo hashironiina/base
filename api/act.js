@@ -72,12 +72,27 @@ module.exports = async (req, res) => {
 
     if (action === 'saveSection') chk(await save('sections', { title: d.title, sort_order: d.sort_order || 0 }));
     else if (action === 'deleteSection') chk(await db.from('sections').delete().eq('id', d.id));
-    else if (action === 'saveArticle') chk(await save('articles', {
-      section_id: d.section_id, title: d.title, body: d.body || '', images: d.images || [],
-      access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
-      stage: Math.max(0, Math.min(9, Number(d.stage) || 0)),
-      updated_at: new Date().toISOString(), updated_by: me.telegram_id,
-    }));
+    else if (action === 'saveArticle') {
+      const row = {
+        section_id: d.section_id, title: d.title, body: d.body || '', images: d.images || [],
+        access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
+        stage: Math.max(0, Math.min(9, Number(d.stage) || 0)),
+        updated_at: new Date().toISOString(), updated_by: me.telegram_id,
+      };
+      // Новая статья встаёт в конец своего раздела
+      if (!d.id) {
+        const mx = chk(await db.from('articles').select('sort_order').eq('section_id', d.section_id)
+          .order('sort_order', { ascending: false }).limit(1)).data;
+        row.sort_order = ((mx[0] && mx[0].sort_order) || 0) + 1;
+      }
+      chk(await save('articles', row));
+    }
+    else if (action === 'reorder') {
+      // Новый порядок статей внутри раздела: ids в нужной очерёдности
+      const ids = (d.ids || []).map(Number).filter(Boolean);
+      const rs = await Promise.all(ids.map((id, i) => db.from('articles').update({ sort_order: i + 1 }).eq('id', id)));
+      rs.forEach(chk);
+    }
     else if (action === 'deleteArticle') chk(await db.from('articles').delete().eq('id', d.id));
     else if (action === 'upload') {
       const name = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.jpg';
