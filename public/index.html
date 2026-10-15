@@ -99,10 +99,14 @@ function results(){
 function tgl(id){OPEN.has(id)?OPEN.delete(id):OPEN.add(id);results()}
 
 function openA(id){
-  if(!D.read.includes(id)){D.read.push(id);api('/api/act',{action:'read',article_id:id}).then(r=>{if(r.advanced){tg.showAlert('Открылся следующий этап!');load()}}).catch(()=>{})}
+  if(!D.read.includes(id)){D.read.push(id);tcheck();api('/api/act',{action:'read',article_id:id}).then(r=>{if(r.advanced){tg.showAlert('Открылся следующий этап!');load()}}).catch(()=>{})}
   view={t:'article',id};render();
 }
 function article(m){
+  articleBase(m);
+  if(D.trainee&&D.trainee.canTest&&D.trainee.hasQuiz)$.insertAdjacentHTML('beforeend','<div class=card style="cursor:default"><b>Все статьи этапа открыты</b><br><button class=main style="margin-top:8px" onclick="go(\'quiz\')">Пройти тест</button></div>');
+}
+function articleBase(m){
   const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
   $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div><div class=abody>${esc(a.body)}</div>`+
     a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+'</div>'+
@@ -213,6 +217,11 @@ async function mv(id,dir){
 }
 
 // ===== Стажёры: этапы и тесты =====
+function tcheck(){
+  const t=D.trainee;if(!t)return;
+  const cur=D.articles.filter(x=>x.stage===t.stage);
+  t.canTest=cur.length>0&&cur.every(x=>D.read.includes(x.id));
+}
 function banner(){
   const t=D.trainee;if(!t)return'';
   const c=x=>`<div class=card style="cursor:default">${x}</div>`;
