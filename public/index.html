@@ -2,25 +2,54 @@
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>База знаний</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Arsenal:wght@400;700&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:var(--tg-theme-bg-color,#fff);--tx:var(--tg-theme-text-color,#222);--hint:var(--tg-theme-hint-color,#888);--btn:var(--tg-theme-button-color,#2a7de1);--btx:var(--tg-theme-button-text-color,#fff);--card:var(--tg-theme-secondary-bg-color,#f1f1f1)}
+:root{--bg:#ededed;--acc:#d6a07c;--accd:#b3764d;--card:#e7d9d0;--cardb:#e1c6b4;--grey:#e1e1e1;--greyb:#9a9a9a;--hint:#6b6b6b;color-scheme:light}
 *{box-sizing:border-box}
-body{margin:0;padding:14px;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,sans-serif}
-h2{margin:6px 0 10px}h3{margin:18px 0 8px}
-input,select,textarea{width:100%;padding:11px;margin:5px 0;border:1px solid var(--card);border-radius:10px;background:var(--card);color:var(--tx);font:inherit}
-button{padding:10px 14px;border:0;border-radius:10px;background:var(--btn);color:var(--btx);font:inherit;cursor:pointer}
-button.sec{background:var(--card);color:var(--tx)}button.danger{background:#d9453b;color:#fff}
-.row{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}.row input{flex:1;margin:0}
-.card{padding:13px;margin:6px 0;border-radius:12px;background:var(--card);cursor:pointer}
-.hint{color:var(--hint)}.body{white-space:pre-wrap;margin:10px 0}
-img{max-width:100%;border-radius:12px;margin:8px 0;display:block}
+html{background:var(--bg)}
+body{margin:0;padding:12px 16px 48px;min-height:100vh;overflow-x:hidden;background:var(--bg);color:#000;font:300 16px/1.35 Montserrat,system-ui,sans-serif}
+.deco{position:fixed;pointer-events:none;z-index:0;border:5px solid var(--acc);opacity:.2}
+#app{position:relative;z-index:1}
+.brand{margin:0 0 18px -16px;width:288px;max-width:85%;height:89px;border-radius:0 44px 44px 0;background:var(--acc);color:#fff;text-align:center;font:700 44px/89px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
+h2,h3{font-family:Arsenal,'Trebuchet MS',sans-serif;font-weight:700}
+h2{font-size:24px;margin:6px 0 10px}h3{font-size:19px;margin:18px 0 8px}
+input,select,textarea{width:100%;padding:9px 16px;margin:5px 0;border:1px solid var(--greyb);border-radius:16px;background:var(--grey);color:#000;font:400 16px Arsenal,'Trebuchet MS',sans-serif}
+textarea{border-radius:20px;font:300 16px/1.35 Montserrat,system-ui,sans-serif}
+.search{height:40px;font-size:20px;margin:0 0 12px}
+button{min-height:41px;padding:0 16px;border:1px solid var(--greyb);border-radius:16px;background:var(--grey);color:#222;font:400 14px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
+button.acc{background:#e2c6b4;border-color:#d0b19d}
+button.main{background:var(--acc);border-color:var(--accd);color:#000}
+button.danger{background:#d9453b;border-color:#b2352d;color:#fff}
+.row{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}.row input{flex:1;margin:0;min-width:0}
+.hint{color:var(--hint)}
+.sec:not(.open){border-bottom:1px solid #d0d0d0}
+.sech{display:flex;align-items:center;padding:14px 4px;font:700 19px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
+.tri{display:inline-block;margin-left:10px;border-left:15px solid var(--acc);border-top:9px solid transparent;border-bottom:9px solid transparent;transition:transform .2s}
+.open .tri{transform:rotate(90deg)}
+.box{margin:6px 0 16px;padding:8px 22px;border:1px solid var(--cardb);border-radius:29px;background:var(--card)}
+.item{display:flex;align-items:baseline;gap:14px;padding:12px 0;border-bottom:1px solid rgba(0,0,0,.12);font:400 17px Montserrat,system-ui,sans-serif;cursor:pointer}
+.tag{font-size:13px;opacity:.5}
+.abox{padding:18px 26px}
+.atitle{margin:0 0 8px;font:500 17px Montserrat,system-ui,sans-serif}
+.abody{white-space:pre-wrap;font-size:17px;line-height:1.35}
+.card{margin:8px 0;padding:12px 16px;border:1px solid var(--cardb);border-radius:20px;background:var(--card);cursor:pointer}
+img{max-width:100%;margin:10px 0;border-radius:16px;display:block}
 </style></head>
-<body><div id="app">Подождите, идёт загрузка…</div>
+<body>
+<div class="deco" style="width:249px;height:249px;border-radius:111px;right:-109px;top:-90px"></div>
+<div class="deco" style="width:182px;height:182px;border-radius:77px;right:-78px;top:-56px"></div>
+<div class="deco" style="width:249px;height:249px;border-radius:111px;left:-78px;bottom:-88px"></div>
+<div class="deco" style="width:182px;height:182px;border-radius:77px;left:-42px;bottom:-55px"></div>
+<div id="app">Загрузка…</div>
 <script>
 const tg=Telegram.WebApp;tg.ready();tg.expand();
+try{tg.setHeaderColor('#ededed');tg.setBackgroundColor('#ededed')}catch(e){}
 const $=document.getElementById('app');
-let D,E,PR,q='',view={t:'list'};
+const H='<div class="brand" onclick="view={t:\'list\'};render()">Юмадиль</div>';
+let D,E,PR,q='',view={t:'list'};const OPEN=new Set();
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(url,body){
   const r=await fetch(url,{method:body?'POST':'GET',headers:{'x-init-data':tg.initData,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
@@ -35,7 +64,7 @@ tg.BackButton.onClick(()=>{view={t:'list'};render()});
 async function load(){
   try{D=await api('/api/data')}catch(e){
     const id=tg.initDataUnsafe?.user?.id||'';
-    $.innerHTML=`<h2>Нет доступа</h2><p>Попроси шеф-баристу добавить тебя в список.</p><p class=hint>Твой Telegram ID (отправь его шеф-бариста): ${id}</p>`;return;
+    $.innerHTML=H+`<h2>Нет доступа</h2><p>Попроси шеф-баристу добавить тебя в список.</p><p class=hint>Твой Telegram ID: ${id}</p>`;return;
   }
   render();
 }
@@ -46,30 +75,34 @@ function render(){
 }
 
 function list(m){
-  $.innerHTML=`<input placeholder="Поиск" value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button onclick="newArt()">+ Статья</button><button class=sec onclick="go('sections')">Разделы</button><button class=sec onclick="go('users')">Люди</button><button class=sec onclick="go('progress')">Прогресс</button></div>`:'')+
+  $.innerHTML=H+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
+    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button></div>`:'')+
     '<div id=res></div>';
   results();
 }
+const tag=a=>D.me.role==='admin'?`<span class=tag>${a.access==='partners'?'партнёры':a.access==='all'?'все':'бариста'}</span>`:'';
 function results(){
   const k=q.trim().toLowerCase();let h='';
   for(const s of D.sections){
     const as=D.articles.filter(a=>a.section_id===s.id&&(!k||(a.title+' '+a.body).toLowerCase().includes(k)));
     if(k&&!as.length)continue;
-    h+=`<h3>${esc(s.title)}</h3>`+(as.map(a=>`<div class=card onclick="openA(${a.id})">${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}${D.me.role==='admin'&&a.access!=='staff'?` <small class=hint>· ${a.access==='partners'?'партнёры':'все'}</small>`:''}</div>`).join('')||'<p class=hint>Пока пусто</p>');
+    const op=k||OPEN.has(s.id);
+    h+=`<div class="sec${op?' open':''}"><div class=sech onclick="tgl(${s.id})"><span>${esc(s.title)}</span><i class=tri></i></div>`+
+      (op?`<div class=box>`+(as.map(a=>`<div class=item onclick="openA(${a.id})"><span>${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}</span>${tag(a)}</div>`).join('')||'<p class=hint>Пока пусто</p>')+`</div>`:'')+`</div>`;
   }
   document.getElementById('res').innerHTML=h||'<p class=hint>Ничего не найдено</p>';
 }
+function tgl(id){OPEN.has(id)?OPEN.delete(id):OPEN.add(id);results()}
 
 function openA(id){
   if(!D.read.includes(id)){D.read.push(id);api('/api/act',{action:'read',article_id:id}).catch(()=>{})}
   view={t:'article',id};render();
 }
 function article(m){
-  const a=D.articles.find(x=>x.id===view.id);
-  $.innerHTML=`<h2>${esc(a.title)}</h2><div class=body>${esc(a.body)}</div>`+
-    a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+
-    (m?`<div class=row><button onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
+  const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
+  $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div><div class=abody>${esc(a.body)}</div>`+
+    a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+'</div>'+
+    (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
 function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],access:'staff',prev:{}};view={t:'edit'};render()}
@@ -80,14 +113,14 @@ function editA(id){
   view={t:'edit'};render();
 }
 function edit(){
-  $.innerHTML=`<h2>${E.id?'Изменить':'Новая статья'}</h2>
+  $.innerHTML=H+`<h2>${E.id?'Изменить':'Новая статья'}</h2>
   <select onchange="E.section_id=+this.value">${D.sections.map(s=>`<option value=${s.id} ${s.id===E.section_id?'selected':''}>${esc(s.title)}</option>`).join('')}</select>
   <select onchange="E.access=this.value"><option value=staff ${E.access==='staff'?'selected':''}>Видят: бариста</option><option value=partners ${E.access==='partners'?'selected':''}>Видят: партнёры</option><option value=all ${E.access==='all'?'selected':''}>Видят: все</option></select>
   <input placeholder="Название" value="${esc(E.title)}" oninput="E.title=this.value">
   <textarea rows=12 placeholder="Текст" oninput="E.body=this.value">${esc(E.body)}</textarea>
   ${E.images.map((n,i)=>`<div><img src="${E.prev[n]||''}"><button class=danger onclick="E.images.splice(${i},1);edit()">Убрать фото</button></div>`).join('')}
   <p class=hint>Добавить фото:</p><input type=file accept="image/*" multiple onchange="addImgs(this.files)">
-  <div class=row><button onclick="saveA()">Сохранить</button></div>`;
+  <div class=row><button class=main onclick="saveA()">Сохранить</button></div>`;
 }
 function shrink(f){return new Promise(r=>{const i=new Image();i.onload=()=>{const k=Math.min(1,1200/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*k;c.height=i.height*k;c.getContext('2d').drawImage(i,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.8))};i.src=URL.createObjectURL(f)})}
 async function addImgs(files){
@@ -106,8 +139,8 @@ async function saveA(){
 function delA(id){tg.showConfirm('Удалить статью?',async ok=>{if(!ok)return;await act({action:'deleteArticle',id});view={t:'list'};load()})}
 
 function sections(){
-  $.innerHTML='<h2>Разделы</h2>'+D.sections.map(s=>`<div class=row><input id=s${s.id} value="${esc(s.title)}"><button onclick="saveS(${s.id},${s.sort_order})">OK</button><button class=danger onclick="delS(${s.id})">✕</button></div>`).join('')+
-  `<h3>Новый раздел</h3><div class=row><input id=sn placeholder="Название"><button onclick="saveS(0,${D.sections.length+1})">Добавить</button></div><p class=hint>При удалении раздела удаляются и все его статьи.</p>`;
+  $.innerHTML=H+'<h2>Разделы</h2>'+D.sections.map(s=>`<div class=row><input id=s${s.id} value="${esc(s.title)}"><button class=main onclick="saveS(${s.id},${s.sort_order})">OK</button><button class=danger onclick="delS(${s.id})">✕</button></div>`).join('')+
+  `<h3>Новый раздел</h3><div class=row><input id=sn placeholder="Название"><button class=main onclick="saveS(0,${D.sections.length+1})">Добавить</button></div><p class=hint>При удалении раздела удаляются и все его статьи.</p>`;
 }
 async function saveS(id,so){
   const v=document.getElementById(id?'s'+id:'sn').value.trim();if(!v)return;
@@ -116,10 +149,10 @@ async function saveS(id,so){
 function delS(id){tg.showConfirm('Удалить раздел вместе со статьями?',async ok=>{if(!ok)return;await act({action:'deleteSection',id});await load()})}
 
 async function users(){
-  $.innerHTML='Загрузка…';
+  $.innerHTML=H+'Загрузка…';
   const {users:U}=await act({action:'listUsers'});
-  $.innerHTML='<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${u.role==='admin'?'редактор':u.role==='partner'?'партнёр':'читает'}<br><small class=hint>${u.telegram_id}</small></span><button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
-  `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select><div class=row><button onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
+  $.innerHTML=H+'<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${u.role==='admin'?'редактор':u.role==='partner'?'партнёр':'читает'}<br><small class=hint>${u.telegram_id}</small></span><button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
+  `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select><div class=row><button class=main onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
 }
 async function addU(){
   const n=un.value.trim(),i=ui.value.trim();
@@ -130,7 +163,7 @@ function delU(id){tg.showConfirm('Убрать доступ?',async ok=>{if(!ok)
 
 // ===== Кто что прочитал (только для редактора) =====
 async function progress(){
-  $.innerHTML='Загрузка…';
+  $.innerHTML=H+'Загрузка…';
   const P=await act({action:'progress'});
   const by={},cnt={},ids=new Set(P.users.map(u=>u.telegram_id));
   P.reads.forEach(r=>{
@@ -140,7 +173,7 @@ async function progress(){
   PR={P,by};
   const total=P.articles.length;
   const rows=P.users.map(u=>({u,n:P.articles.filter(a=>(by[u.telegram_id]||new Set()).has(a.id)).length})).sort((a,b)=>a.n-b.n);
-  $.innerHTML='<h2>Кто что прочитал</h2><p class=hint>«Прочитано» значит «открыл статью». Нажми на имя, чтобы увидеть, что не открыто.</p>'+
+  $.innerHTML=H+'<h2>Кто что прочитал</h2><p class=hint>«Прочитано» значит «открыл статью». Нажми на имя, чтобы увидеть, что не открыто.</p>'+
     (rows.map(({u,n})=>`<div class=card onclick="toggleP(${u.telegram_id})"><b>${esc(u.name)}</b> — ${n} из ${total} (${total?Math.round(n/total*100):0}%)<div id="p${u.telegram_id}" style="display:none"></div></div>`).join('')||'<p class=hint>Пока нет бариста в списке (роль «читает»).</p>')+
     '<h3>По статьям</h3>'+
     P.articles.map(a=>`<div class=card style="cursor:default">${esc(a.title)}<br><small class=hint>открыли ${cnt[a.id]||0} из ${P.users.length}</small></div>`).join('');
