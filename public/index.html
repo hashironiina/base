@@ -38,6 +38,7 @@ button.danger{background:#d9453b;border-color:#b2352d;color:#fff}
 .card{margin:8px 0;padding:12px 16px;border:1px solid var(--cardb);border-radius:20px;background:var(--card);cursor:pointer}
 img{max-width:100%;margin:10px 0;border-radius:16px;display:block}
 input[type=radio]{width:22px;height:22px;padding:0;margin:0 10px 0 0;flex:none;accent-color:var(--accd)}
+.mv button{min-height:34px;padding:0 14px;margin-left:6px}
 .opt{display:flex;align-items:center;padding:7px 0;font:300 16px Montserrat,system-ui,sans-serif}
 </style></head>
 <body>
@@ -51,7 +52,7 @@ const tg=Telegram.WebApp;tg.ready();tg.expand();
 try{tg.setHeaderColor('#e9e2d8');tg.setBackgroundColor('#e9e2d8')}catch(e){}
 const $=document.getElementById('app');
 const H='<div class="brand" onclick="view={t:\'list\'};render()">Юмадиль</div>';
-let D,E,PR,QZ,QE,q='',view={t:'list'};const OPEN=new Set();
+let D,E,PR,QZ,QE,ORD=false,q='',view={t:'list'};const OPEN=new Set();
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(url,body){
   const r=await fetch(url,{method:body?'POST':'GET',headers:{'x-init-data':tg.initData,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
@@ -79,7 +80,7 @@ function render(){
 
 function list(m){
   $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button></div>`:'')+
+    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button></div>`:'')+
     '<div id=res></div>';
   results();
 }
@@ -89,9 +90,9 @@ function results(){
   for(const s of D.sections){
     const as=D.articles.filter(a=>a.section_id===s.id&&(!k||(a.title+' '+a.body).toLowerCase().includes(k)));
     if(k&&!as.length)continue;
-    const op=k||OPEN.has(s.id);
+    const op=k||ORD||OPEN.has(s.id);
     h+=`<div class="sec${op?' open':''}"><div class=sech onclick="tgl(${s.id})"><span>${esc(s.title)}</span><i class=tri></i></div>`+
-      (op?`<div class=box>`+(as.map(a=>`<div class=item onclick="openA(${a.id})"><span>${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}</span>${tag(a)}</div>`).join('')||'<p class=hint>Пока пусто</p>')+`</div>`:'')+`</div>`;
+      (op?`<div class=box>`+(as.map(a=>item(a,k)).join('')||'<p class=hint>Пока пусто</p>')+`</div>`:'')+`</div>`;
   }
   document.getElementById('res').innerHTML=h||'<p class=hint>Ничего не найдено</p>';
 }
@@ -193,6 +194,23 @@ function toggleP(id){
   el.style.display='block';
 }
 
+
+// ===== Порядок статей (режим «Порядок», только редактор) =====
+function item(a,k){
+  if(ORD&&!k)return `<div class=item style="align-items:center"><span style="flex:1">${esc(a.title)}</span><span class=mv><button onclick="mv(${a.id},-1)">↑</button><button onclick="mv(${a.id},1)">↓</button></span></div>`;
+  return `<div class=item onclick="openA(${a.id})"><span>${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}</span>${tag(a)}</div>`;
+}
+async function mv(id,dir){
+  const a=D.articles.find(x=>x.id===id);
+  const arr=D.articles.filter(x=>x.section_id===a.section_id);
+  const i=arr.indexOf(a),j=i+dir;
+  if(j<0||j>=arr.length)return;
+  [arr[i],arr[j]]=[arr[j],arr[i]];
+  arr.forEach((x,n)=>x.sort_order=n+1);
+  D.articles.sort((x,y)=>x.sort_order-y.sort_order||x.id-y.id);
+  results();
+  try{await api('/api/act',{action:'reorder',ids:arr.map(x=>x.id)})}catch(e){tg.showAlert('Не удалось сохранить порядок');load()}
+}
 
 // ===== Стажёры: этапы и тесты =====
 function banner(){
