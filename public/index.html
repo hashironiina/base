@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Arsenal:wght@400;700&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#F1E9E4;--acc:#d6a07c;--accd:#b3764d;--card:#e2d0c3;--cardb:#d9bda9;--grey:#ddd6cc;--greyb:#a8a095;--hint:#6e675e;color-scheme:light}
+:root{--bg:#e9e2d8;--acc:#d6a07c;--accd:#b3764d;--card:#e2d0c3;--cardb:#d9bda9;--grey:#ddd6cc;--greyb:#a8a095;--hint:#6e675e;color-scheme:light}
 *{box-sizing:border-box}
 html{background:var(--bg)}
 body{margin:0;padding:12px 16px 48px;min-height:100vh;overflow-x:hidden;background:var(--bg);color:#000;font:300 16px/1.35 Montserrat,system-ui,sans-serif}
@@ -37,6 +37,8 @@ button.danger{background:#d9453b;border-color:#b2352d;color:#fff}
 .abody{white-space:pre-wrap;font-size:17px;line-height:1.35}
 .card{margin:8px 0;padding:12px 16px;border:1px solid var(--cardb);border-radius:20px;background:var(--card);cursor:pointer}
 img{max-width:100%;margin:10px 0;border-radius:16px;display:block}
+input[type=radio]{width:22px;height:22px;padding:0;margin:0 10px 0 0;flex:none;accent-color:var(--accd)}
+.opt{display:flex;align-items:center;padding:7px 0;font:300 16px Montserrat,system-ui,sans-serif}
 </style></head>
 <body>
 <div class="deco" style="width:249px;height:249px;border-radius:111px;right:-109px;top:-90px"></div>
@@ -49,7 +51,7 @@ const tg=Telegram.WebApp;tg.ready();tg.expand();
 try{tg.setHeaderColor('#e9e2d8');tg.setBackgroundColor('#e9e2d8')}catch(e){}
 const $=document.getElementById('app');
 const H='<div class="brand" onclick="view={t:\'list\'};render()">Юмадиль</div>';
-let D,E,PR,q='',view={t:'list'};const OPEN=new Set();
+let D,E,PR,QZ,QE,q='',view={t:'list'};const OPEN=new Set();
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(url,body){
   const r=await fetch(url,{method:body?'POST':'GET',headers:{'x-init-data':tg.initData,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
@@ -57,7 +59,8 @@ async function api(url,body){
   if(!r.ok)throw new Error(j.error||r.status);
   return j;
 }
-const act=async b=>{try{return await api('/api/act',b)}catch(e){tg.showAlert('Ошибка: '+e.message);throw e}};
+const ERR={read_first:'Сначала открой все статьи этапа',no_quiz:'Для этого этапа нет теста',trainee_only:'Тест только для стажёров'};
+const act=async b=>{try{return await api('/api/act',b)}catch(e){tg.showAlert(ERR[e.message]||('Ошибка: '+e.message));throw e}};
 const go=t=>{view={t};render()};
 tg.BackButton.onClick(()=>{view={t:'list'};render()});
 
@@ -71,16 +74,16 @@ async function load(){
 function render(){
   const m=D.me.role==='admin';
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit})[view.t]();
 }
 
 function list(m){
-  $.innerHTML=H+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button></div>`:'')+
+  $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
+    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button></div>`:'')+
     '<div id=res></div>';
   results();
 }
-const tag=a=>D.me.role==='admin'?`<span class=tag>${a.access==='partners'?'партнёры':a.access==='all'?'все':'бариста'}</span>`:'';
+const tag=a=>D.me.role==='admin'?`<span class=tag>${a.access==='partners'?'партнёры':a.access==='all'?'все':'бариста'}${a.stage>0?' · этап '+a.stage:''}</span>`:'';
 function results(){
   const k=q.trim().toLowerCase();let h='';
   for(const s of D.sections){
@@ -95,7 +98,7 @@ function results(){
 function tgl(id){OPEN.has(id)?OPEN.delete(id):OPEN.add(id);results()}
 
 function openA(id){
-  if(!D.read.includes(id)){D.read.push(id);api('/api/act',{action:'read',article_id:id}).catch(()=>{})}
+  if(!D.read.includes(id)){D.read.push(id);api('/api/act',{action:'read',article_id:id}).then(r=>{if(r.advanced){tg.showAlert('Открылся следующий этап!');load()}}).catch(()=>{})}
   view={t:'article',id};render();
 }
 function article(m){
@@ -105,10 +108,10 @@ function article(m){
     (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
-function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],access:'staff',prev:{}};view={t:'edit'};render()}
+function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],access:'staff',stage:0,prev:{}};view={t:'edit'};render()}
 function editA(id){
   const a=D.articles.find(x=>x.id===id);
-  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',prev:{}};
+  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',stage:a.stage||0,prev:{}};
   a.images.forEach((n,i)=>E.prev[n]=a.imageUrls[i]);
   view={t:'edit'};render();
 }
@@ -116,6 +119,7 @@ function edit(){
   $.innerHTML=H+`<h2>${E.id?'Изменить':'Новая статья'}</h2>
   <select onchange="E.section_id=+this.value">${D.sections.map(s=>`<option value=${s.id} ${s.id===E.section_id?'selected':''}>${esc(s.title)}</option>`).join('')}</select>
   <select onchange="E.access=this.value"><option value=staff ${E.access==='staff'?'selected':''}>Видят: бариста</option><option value=partners ${E.access==='partners'?'selected':''}>Видят: партнёры</option><option value=all ${E.access==='all'?'selected':''}>Видят: все</option></select>
+  <select onchange="E.stage=+this.value"><option value=0 ${!E.stage?'selected':''}>Стажёр не видит</option>${[1,2,3,4,5,6].map(n=>`<option value=${n} ${E.stage===n?'selected':''}>Стажёр: этап ${n}</option>`).join('')}</select>
   <input placeholder="Название" value="${esc(E.title)}" oninput="E.title=this.value">
   <textarea rows=12 placeholder="Текст" oninput="E.body=this.value">${esc(E.body)}</textarea>
   ${E.images.map((n,i)=>`<div><img src="${E.prev[n]||''}"><button class=danger onclick="E.images.splice(${i},1);edit()">Убрать фото</button></div>`).join('')}
@@ -133,7 +137,7 @@ async function addImgs(files){
 }
 async function saveA(){
   if(!E.title.trim())return tg.showAlert('Впиши название');
-  await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images,access:E.access});
+  await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images,access:E.access,stage:E.stage});
   view={t:'list'};await load();
 }
 function delA(id){tg.showConfirm('Удалить статью?',async ok=>{if(!ok)return;await act({action:'deleteArticle',id});view={t:'list'};load()})}
@@ -151,9 +155,11 @@ function delS(id){tg.showConfirm('Удалить раздел вместе со 
 async function users(){
   $.innerHTML=H+'Загрузка…';
   const {users:U}=await act({action:'listUsers'});
-  $.innerHTML=H+'<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${u.role==='admin'?'редактор':u.role==='partner'?'партнёр':'читает'}<br><small class=hint>${u.telegram_id}</small></span><button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
-  `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select><div class=row><button class=main onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
+  $.innerHTML=H+'<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${lab(u)}<br><small class=hint>${u.telegram_id}</small></span>${u.role==='trainee'?`<button onclick="stg(${u.telegram_id},${u.stage-1})">−</button><button onclick="stg(${u.telegram_id},${u.stage+1})">+</button>`:''}<button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
+  `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=trainee>Стажёр</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select><div class=row><button class=main onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
 }
+const lab=u=>u.role==='admin'?'редактор':u.role==='partner'?'партнёр':u.role==='trainee'?`стажёр · этап ${u.stage}`:'читает';
+async function stg(id,s){if(s<1)return;await act({action:'setStage',telegram_id:id,stage:s});users()}
 async function addU(){
   const n=un.value.trim(),i=ui.value.trim();
   if(!n||!/^\d+$/.test(i))return tg.showAlert('Нужны имя и ID из цифр');
@@ -175,7 +181,7 @@ async function progress(){
   const rows=P.users.map(u=>({u,n:P.articles.filter(a=>(by[u.telegram_id]||new Set()).has(a.id)).length})).sort((a,b)=>a.n-b.n);
   $.innerHTML=H+'<h2>Кто что прочитал</h2><p class=hint>«Прочитано» значит «открыл статью». Нажми на имя, чтобы увидеть, что не открыто.</p>'+
     (rows.map(({u,n})=>`<div class=card onclick="toggleP(${u.telegram_id})"><b>${esc(u.name)}</b> — ${n} из ${total} (${total?Math.round(n/total*100):0}%)<div id="p${u.telegram_id}" style="display:none"></div></div>`).join('')||'<p class=hint>Пока нет бариста в списке (роль «читает»).</p>')+
-    '<h3>По статьям</h3>'+
+    trBlock(P,by)+'<h3>По статьям</h3>'+
     P.articles.map(a=>`<div class=card style="cursor:default">${esc(a.title)}<br><small class=hint>открыли ${cnt[a.id]||0} из ${P.users.length}</small></div>`).join('');
 }
 function toggleP(id){
@@ -185,6 +191,68 @@ function toggleP(id){
   const no=PR.P.articles.filter(a=>!s.has(a.id));
   el.innerHTML='<p class=hint>Не открывал:</p>'+(no.length?no.map(a=>'<div>• '+esc(a.title)+'</div>').join(''):'<div>всё открыл ✓</div>');
   el.style.display='block';
+}
+
+
+// ===== Стажёры: этапы и тесты =====
+function banner(){
+  const t=D.trainee;if(!t)return'';
+  const c=x=>`<div class=card style="cursor:default">${x}</div>`;
+  if(!t.max)return c('Для тебя пока нет материалов. Напиши шеф-баристе.');
+  if(t.done)return c('Обучение пройдено 🎉');
+  return c(`<b>Этап ${t.stage} из ${t.max}</b><br>`+(t.hasQuiz?(t.canTest?`<button class=main style="margin-top:8px" onclick="go('quiz')">Пройти тест</button>`:'<span class=hint>Открой все статьи этапа, чтобы пройти тест.</span>'):'<span class=hint>Открой все статьи этапа, и следующий откроется сам.</span>'));
+}
+async function quiz(){
+  $.innerHTML=H+'Загрузка…';
+  QZ=await act({action:'quizGet'});QZ.ans=[];
+  $.innerHTML=H+`<h2>${esc(QZ.title||'Тест')}</h2><p class=hint>Нужно правильных ответов: ${QZ.pass_percent}%.</p>`+
+    QZ.questions.map((x,i)=>`<div class=card style="cursor:default"><b>${i+1}. ${esc(x.q)}</b>`+x.options.map((o,j)=>`<label class=opt><input type=radio name=q${i} onchange="QZ.ans[${i}]=${j}">${esc(o)}</label>`).join('')+'</div>').join('')+
+    '<div class=row><button class=main onclick="sendQuiz()">Отправить</button></div>';
+}
+async function sendQuiz(){
+  if(QZ.questions.some((_,i)=>QZ.ans[i]===undefined))return tg.showAlert('Ответь на все вопросы');
+  const r=await act({action:'quizSubmit',answers:QZ.questions.map((_,i)=>QZ.ans[i])});
+  $.innerHTML=H+`<h2>${r.passed?'Тест сдан 🎉':'Пока не сдан'}</h2><p>Результат: ${r.score}%</p>`+
+    (r.passed?'<p>Открылся следующий этап.</p>':`<p>Ошибки в вопросах: ${r.wrong.join(', ')}. Перечитай статьи этапа и попробуй ещё раз.</p>`)+
+    '<div class=row><button class=main onclick="view={t:\'list\'};load()">К статьям</button></div>';
+}
+async function quizzes(){
+  $.innerHTML=H+'Загрузка…';
+  const {quizzes:Q}=await act({action:'quizList'});window.QL=Q;
+  $.innerHTML=H+'<h2>Тесты</h2><p class=hint>Тест привязан к этапу: стажёр сдаёт его, чтобы открыть следующий этап. Если у этапа нет теста, он откроется сам, когда стажёр откроет все его статьи.</p>'+
+    Q.map(x=>`<div class=card onclick="editQ(${x.stage})"><b>Этап ${x.stage}</b> — ${esc(x.title||'Тест')}<br><small class=hint>вопросов: ${(x.questions||[]).length}, порог ${x.pass_percent}%</small></div>`).join('')+
+    '<div class=row><button class=main onclick="editQ(0)">+ Новый тест</button></div>';
+}
+function editQ(stage){
+  const x=stage&&QL.find(y=>y.stage===stage);
+  const used=new Set(QL.map(y=>y.stage));let free=1;while(used.has(free))free++;
+  QE=x?{stage:x.stage,isNew:false,title:x.title,pass_percent:x.pass_percent,questions:JSON.parse(JSON.stringify(x.questions))}
+      :{stage:free,isNew:true,title:'',pass_percent:80,questions:[{q:'',options:['','','',''],correct:0}]};
+  view={t:'qedit'};render();
+}
+function qedit(){
+  $.innerHTML=H+'<h2>Тест этапа</h2>'+
+  (QE.isNew?`<select onchange="QE.stage=+this.value">${[1,2,3,4,5,6].map(n=>`<option value=${n} ${n===QE.stage?'selected':''}>Этап ${n}</option>`).join('')}</select>`:`<p><b>Этап ${QE.stage}</b></p>`)+
+  `<input placeholder="Название теста" value="${esc(QE.title)}" oninput="QE.title=this.value">
+  <input placeholder="Порог, %" inputmode=numeric value="${QE.pass_percent}" oninput="QE.pass_percent=+this.value||80">`+
+  QE.questions.map((x,i)=>`<div class=card style="cursor:default"><input placeholder="Вопрос ${i+1}" value="${esc(x.q)}" oninput="QE.questions[${i}].q=this.value">`+
+    x.options.map((o,j)=>`<div class=row><input type=radio name=c${i} ${x.correct===j?'checked':''} onchange="QE.questions[${i}].correct=${j}"><input placeholder="Вариант ${j+1}" value="${esc(o)}" oninput="QE.questions[${i}].options[${j}]=this.value"></div>`).join('')+
+    `<p class=hint>Кружок слева отмечает правильный ответ.</p><button class=danger onclick="QE.questions.splice(${i},1);qedit()">Удалить вопрос</button></div>`).join('')+
+  `<div class=row><button onclick="QE.questions.push({q:'',options:['','','',''],correct:0});qedit()">+ Вопрос</button></div>
+  <div class=row><button class=main onclick="saveQ()">Сохранить</button>${QE.isNew?'':'<button class=danger onclick="delQ()">Удалить тест</button>'}</div>`;
+}
+async function saveQ(){
+  await act({action:'quizSave',stage:QE.stage,title:QE.title,pass_percent:QE.pass_percent,questions:QE.questions});
+  go('quizzes');
+}
+function delQ(){tg.showConfirm('Удалить тест этого этапа?',async ok=>{if(!ok)return;await act({action:'quizDelete',stage:QE.stage});go('quizzes')})}
+function trBlock(P,by){
+  if(!P.trainees.length)return'';
+  return '<h3>Стажёры</h3>'+P.trainees.map(t=>{
+    const av=P.articles.filter(a=>a.stage>=1&&a.stage<=t.stage),s=by[t.telegram_id]||new Set();
+    const n=av.filter(a=>s.has(a.id)).length,at=P.attempts.find(x=>x.telegram_id===t.telegram_id);
+    return `<div class=card style="cursor:default"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>открыто ${n} из ${av.length}${at?` · последний тест: ${at.score}% (${at.passed?'сдан':'не сдан'}, этап ${at.stage})`:''}</small></div>`;
+  }).join('');
 }
 
 load();
