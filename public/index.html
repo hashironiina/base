@@ -331,13 +331,31 @@ async function saveQ(){
   go('quizzes');
 }
 function delQ(){tg.showConfirm('Удалить тест этого этапа?',async ok=>{if(!ok)return;await act({action:'quizDelete',stage:QE.stage});go('quizzes')})}
+const dt=s=>new Date(s).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+let TA=[];
 function trBlock(P,by){
   if(!P.trainees.length)return'';
-  return '<h3>Стажёры</h3>'+P.trainees.map(t=>{
+  TA=P.attempts;
+  return '<h3>Стажёры</h3><p class=hint>Нажми на имя, чтобы увидеть все попытки теста.</p>'+P.trainees.map(t=>{
     const av=P.articles.filter(a=>a.stage>=1&&a.stage<=t.stage),s=by[t.telegram_id]||new Set();
-    const n=av.filter(a=>s.has(a.id)).length,at=P.attempts.find(x=>x.telegram_id===t.telegram_id);
-    return `<div class=card style="cursor:default"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>открыто ${n} из ${av.length}${at?` · последний тест: ${at.score}% (${at.passed?'сдан':'не сдан'}, этап ${at.stage})`:''}</small></div>`;
+    const n=av.filter(a=>s.has(a.id)).length,my=P.attempts.filter(x=>x.telegram_id===t.telegram_id),at=my[0];
+    return `<div class=card onclick="toggleT(${t.telegram_id})"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>открыто ${n} из ${av.length} · попыток теста: ${my.length}${at?` · последняя: ${at.score}% (${at.passed?'сдан':'не сдан'})`:''}</small><div id="t${t.telegram_id}" style="display:none"></div></div>`;
   }).join('');
+}
+function toggleT(id){
+  const el=document.getElementById('t'+id);
+  if(el.style.display==='block'){el.style.display='none';return}
+  const my=TA.filter(x=>x.telegram_id===id);
+  if(!my.length)el.innerHTML='<p class=hint>Тесты ещё не проходил.</p>';
+  else{
+    const st=[...new Set(my.map(x=>x.stage))].sort((x,y)=>x-y);
+    el.innerHTML=st.map(g=>{
+      const a=my.filter(x=>x.stage===g),best=Math.max(...a.map(x=>x.score)),ok=a.find(x=>x.passed);
+      return `<p><b>Этап ${g}:</b> попыток ${a.length}, лучший результат ${best}%, ${ok?'сдан '+dt(ok.created_at):'не сдан'}</p>`+
+        a.slice().reverse().map(x=>`<div class=hint>${dt(x.created_at)} — ${x.score}% ${x.passed?'✓ сдан':'✗ не сдан'}</div>`).join('');
+    }).join('');
+  }
+  el.style.display='block';
 }
 
 load();
