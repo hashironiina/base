@@ -7,25 +7,25 @@
 <link href="https://fonts.googleapis.com/css2?family=Arsenal:wght@400;700&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#ededed;--acc:#d6a07c;--accd:#b3764d;--card:#e7d9d0;--cardb:#e1c6b4;--grey:#e1e1e1;--greyb:#9a9a9a;--hint:#6b6b6b;color-scheme:light}
+:root{--bg:#e9e2d8;--acc:#d6a07c;--accd:#b3764d;--card:#e2d0c3;--cardb:#d9bda9;--grey:#ddd6cc;--greyb:#a8a095;--hint:#6e675e;color-scheme:light}
 *{box-sizing:border-box}
 html{background:var(--bg)}
 body{margin:0;padding:12px 16px 48px;min-height:100vh;overflow-x:hidden;background:var(--bg);color:#000;font:300 16px/1.35 Montserrat,system-ui,sans-serif}
 .deco{position:fixed;pointer-events:none;z-index:0;border:5px solid var(--acc);opacity:.2}
 #app{position:relative;z-index:1}
-.brand{margin:0 0 18px -16px;width:288px;max-width:85%;height:89px;border-radius:0 44px 44px 0;background:var(--acc);color:#fff;text-align:center;font:700 44px/89px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
+.brand{margin:0 0 14px -16px;width:190px;max-width:70%;height:56px;border-radius:0 28px 28px 0;background:var(--acc);color:#fff;text-align:center;font:700 29px/56px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
 h2,h3{font-family:Arsenal,'Trebuchet MS',sans-serif;font-weight:700}
 h2{font-size:24px;margin:6px 0 10px}h3{font-size:19px;margin:18px 0 8px}
 input,select,textarea{width:100%;padding:9px 16px;margin:5px 0;border:1px solid var(--greyb);border-radius:16px;background:var(--grey);color:#000;font:400 16px Arsenal,'Trebuchet MS',sans-serif}
 textarea{border-radius:20px;font:300 16px/1.35 Montserrat,system-ui,sans-serif}
 .search{height:40px;font-size:20px;margin:0 0 12px}
 button{min-height:41px;padding:0 16px;border:1px solid var(--greyb);border-radius:16px;background:var(--grey);color:#222;font:400 14px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
-button.acc{background:#e2c6b4;border-color:#d0b19d}
+button.acc{background:#e0c3ae;border-color:#cfae97}
 button.main{background:var(--acc);border-color:var(--accd);color:#000}
 button.danger{background:#d9453b;border-color:#b2352d;color:#fff}
 .row{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}.row input{flex:1;margin:0;min-width:0}
 .hint{color:var(--hint)}
-.sec:not(.open){border-bottom:1px solid #d0d0d0}
+.sec:not(.open){border-bottom:1px solid #cfc6b8}
 .sech{display:flex;align-items:center;padding:14px 4px;font:700 19px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
 .tri{display:inline-block;margin-left:10px;border-left:15px solid var(--acc);border-top:9px solid transparent;border-bottom:9px solid transparent;transition:transform .2s}
 .open .tri{transform:rotate(90deg)}
@@ -46,7 +46,7 @@ img{max-width:100%;margin:10px 0;border-radius:16px;display:block}
 <div id="app">Загрузка…</div>
 <script>
 const tg=Telegram.WebApp;tg.ready();tg.expand();
-try{tg.setHeaderColor('#ededed');tg.setBackgroundColor('#ededed')}catch(e){}
+try{tg.setHeaderColor('#e9e2d8');tg.setBackgroundColor('#e9e2d8')}catch(e){}
 const $=document.getElementById('app');
 const H='<div class="brand" onclick="view={t:\'list\'};render()">Юмадиль</div>';
 let D,E,PR,q='',view={t:'list'};const OPEN=new Set();
