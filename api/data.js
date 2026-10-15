@@ -5,6 +5,7 @@ const VISIBLE = {
   admin: ['staff', 'partners', 'all'],
   reader: ['staff', 'all'],
   partner: ['partners', 'all'],
+  trainee: ['staff', 'all'],
 };
 
 module.exports = async (req, res) => {
@@ -12,9 +13,13 @@ module.exports = async (req, res) => {
   if (!me) return res.status(403).json({ error: 'no_access' });
   const levels = VISIBLE[me.role] || ['all'];
 
+  let aq = db.from('articles').select('*').in('access', levels).order('sort_order').order('id');
+  // Стажёр видит только статьи уже открытых этапов (этап статьи от 1 до его текущего)
+  if (me.role === 'trainee') aq = aq.gte('stage', 1).lte('stage', me.stage);
+
   const [s, a, r] = await Promise.all([
     db.from('sections').select('*').order('sort_order'),
-    db.from('articles').select('*').in('access', levels).order('sort_order').order('id'),
+    aq,
     db.from('reads').select('article_id').eq('telegram_id', me.telegram_id),
   ]);
 
@@ -23,6 +28,25 @@ module.exports = async (req, res) => {
   const sections = (s.data || []).filter(
     (x) => me.role === 'admin' || articles.some((y) => y.section_id === x.id)
   );
+
+  // Состояние обучения стажёра
+  let trainee = null;
+  if (me.role === 'trainee') {
+    const readSet = new Set((r.data || []).map((x) => x.article_id));
+    const cur = articles.filter((x) => x.stage === me.stage);
+    const top = await db.from('articles').select('stage').in('access', ['staff', 'all'])
+      .order('stage', { ascending: false }).limit(1);
+    const max = (top.data && top.data[0] && top.data[0].stage) || 0;
+    const qz = await db.from('quizzes').select('questions').eq('stage', me.stage).maybeSingle();
+    const n = qz.data && Array.isArray(qz.data.questions) ? qz.data.questions.length : 0;
+    trainee = {
+      stage: me.stage,
+      max,
+      done: max > 0 && me.stage > max,
+      canTest: cur.length > 0 && cur.every((x) => readSet.has(x.id)),
+      hasQuiz: n > 0,
+    };
+  }
 
   // Картинки лежат в закрытом хранилище, выдаём временные ссылки на 1 час
   const names = [...new Set(articles.flatMap((x) => x.images))];
@@ -34,6 +58,7 @@ module.exports = async (req, res) => {
 
   res.json({
     me: { id: me.telegram_id, name: me.name, role: me.role },
+    trainee,
     sections,
     articles: articles.map((x) => ({ ...x, imageUrls: x.images.map((n) => urls[n] || '') })),
     read: (r.data || []).map((x) => x.article_id),
