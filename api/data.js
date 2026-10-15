@@ -56,11 +56,22 @@ module.exports = async (req, res) => {
     (data || []).forEach((d) => { urls[d.path] = d.signedUrl; });
   }
 
+  // Файлы (PDF/Word): временные ссылки на скачивание с исходным именем файла
+  const furls = {};
+  await Promise.all(articles.flatMap((x) => x.files || []).map(async (f) => {
+    const { data } = await db.storage.from('images').createSignedUrl(f.path, 3600, { download: f.title });
+    furls[f.path] = (data && data.signedUrl) || '';
+  }));
+
   res.json({
     me: { id: me.telegram_id, name: me.name, role: me.role },
     trainee,
     sections,
-    articles: articles.map((x) => ({ ...x, imageUrls: x.images.map((n) => urls[n] || '') })),
+    articles: articles.map((x) => ({
+      ...x,
+      imageUrls: x.images.map((n) => urls[n] || ''),
+      files: (x.files || []).map((f) => ({ ...f, url: furls[f.path] || '' })),
+    })),
     read: (r.data || []).map((x) => x.article_id),
   });
 };
