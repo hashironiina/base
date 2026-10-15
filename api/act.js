@@ -200,8 +200,14 @@ module.exports = async (req, res) => {
       out.users = chk(await db.from('users').select('telegram_id,name').eq('role', 'reader').order('name')).data;
       out.trainees = chk(await db.from('users').select('telegram_id,name,stage').eq('role', 'trainee').order('name')).data;
       out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).order('section_id').order('sort_order').order('id')).data;
-      out.attempts = chk(await db.from('quiz_attempts').select('telegram_id,stage,score,passed,created_at')
-        .order('created_at', { ascending: false }).limit(300)).data;
+      let attempts = [];
+      for (let i = 0; ; i += 1000) {
+        const x = chk(await db.from('quiz_attempts').select('telegram_id,stage,score,passed,created_at')
+          .order('created_at', { ascending: false }).range(i, i + 999)).data;
+        attempts = attempts.concat(x);
+        if (x.length < 1000) break;
+      }
+      out.attempts = attempts;
       let reads = [];
       for (let i = 0; ; i += 1000) {
         const x = chk(await db.from('reads').select('telegram_id,article_id').range(i, i + 999)).data;
