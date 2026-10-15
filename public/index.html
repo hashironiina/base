@@ -110,14 +110,14 @@ function article(m){
 function articleBase(m){
   const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
   $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div><div class=abody>${esc(a.body)}</div>`+
-    a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+'</div>'+
+    a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+filesHtml(a)+'</div>'+
     (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
-function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],access:'staff',stage:0,notify:false,prev:{}};view={t:'edit'};render()}
+function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],files:[],access:'staff',stage:0,notify:false,prev:{}};view={t:'edit'};render()}
 function editA(id){
   const a=D.articles.find(x=>x.id===id);
-  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',stage:a.stage||0,notify:false,prev:{}};
+  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',files:(a.files||[]).map(f=>({...f})),stage:a.stage||0,notify:false,prev:{}};
   a.images.forEach((n,i)=>E.prev[n]=a.imageUrls[i]);
   view={t:'edit'};render();
 }
@@ -130,6 +130,9 @@ function edit(){
   <textarea rows=12 placeholder="Текст" oninput="E.body=this.value">${esc(E.body)}</textarea>
   ${E.images.map((n,i)=>`<div><img src="${E.prev[n]||''}"><button class=danger onclick="E.images.splice(${i},1);edit()">Убрать фото</button></div>`).join('')}
   <p class=hint>Добавить фото:</p><input type=file accept="image/*" multiple onchange="addImgs(this.files)">
+  <p class=hint>Файлы для скачивания (PDF, Word):</p>
+  ${E.files.map((f,i)=>`<div class=row><span style="flex:1">📄 ${esc(f.title)}</span><button class=danger onclick="E.files.splice(${i},1);edit()">✕</button></div>`).join('')}
+  <input type=file accept=".pdf,.doc,.docx,application/pdf" multiple onchange="addFiles(this.files)"><p id=fs class=hint></p>
   <label class=opt><input type=checkbox onchange="E.notify=this.checked">Отправить уведомление в Telegram</label>
   <div class=row><button class=main onclick="saveA()">Сохранить</button></div>`;
 }
@@ -144,7 +147,7 @@ async function addImgs(files){
 }
 async function saveA(){
   if(!E.title.trim())return tg.showAlert('Впиши название');
-  const sv=await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images,access:E.access,stage:E.stage});
+  const sv=await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images,files:E.files.map(f=>({path:f.path,title:f.title,size:f.size})),access:E.access,stage:E.stage});
   if(E.notify&&sv.id){const r=await act({action:'notify',article_id:sv.id,kind:E.id?'updated':'new'});report(r)}
   view={t:'list'};await load();
 }
@@ -202,6 +205,40 @@ function toggleP(id){
 }
 
 
+// ===== Файлы в статьях (PDF, Word) =====
+let FU=[];
+const fsz=s=>s>1e6?(s/1e6).toFixed(1)+' МБ':Math.max(1,Math.round(s/1e3))+' КБ';
+const setFS=t=>{const e=document.getElementById('fs');if(e)e.textContent=t};
+function filesHtml(a){
+  if(!a.files||!a.files.length)return'';
+  FU=a.files.map(f=>f.url);
+  return '<div style="margin-top:14px"><b>Файлы для скачивания</b></div>'+a.files.map((f,i)=>`<div class=item onclick="dl(${i})"><span style="flex:1">📄 ${esc(f.title)}</span><span class=tag>${fsz(f.size)} · скачать</span></div>`).join('');
+}
+function dl(i){const u=FU[i];if(!u)return tg.showAlert('Ссылка не создалась, закрой и снова открой приложение');tg.openLink(u)}
+async function addFiles(files){
+  for(const f of files){try{await uploadFile(f)}catch(e){}}
+  edit();
+}
+async function uploadFile(f){
+  const ext=(f.name.match(/\.(pdf|docx?)$/i)||[])[0];
+  if(!ext)return tg.showAlert('Подходят только PDF и Word (.pdf, .doc, .docx)');
+  if(f.size>20e6)return tg.showAlert('Файл больше 20 МБ');
+  setFS('Загружаю «'+f.name+'»…');
+  const u=await act({action:'fileUrl',ext:ext.toLowerCase()});
+  let ok=false;
+  try{
+    const fd=new FormData();fd.append('cacheControl','3600');fd.append('',f);
+    const r=await fetch(u.signedUrl,{method:'PUT',body:fd,headers:{'x-upsert':'false'}});
+    ok=r.ok;
+  }catch(e){}
+  if(!ok){
+    if(f.size>3e6){setFS('');return tg.showAlert('Не удалось загрузить файл. Попробуй файл меньше 3 МБ.')}
+    const data=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result.split(',')[1]);fr.readAsDataURL(f)});
+    await act({action:'fileUpload',path:u.path,data});
+  }
+  E.files.push({path:u.path,title:f.name,size:f.size});
+}
+
 // ===== Уведомления в Telegram =====
 function askWrite(){
   try{if(D.me.role!=='admin'&&!localStorage.getItem('wa')&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.9')){localStorage.setItem('wa','1');tg.requestWriteAccess()}}catch(e){}
@@ -223,7 +260,7 @@ function sendNews(){
 // ===== Порядок статей (режим «Порядок», только редактор) =====
 function item(a,k){
   if(ORD&&!k)return `<div class=item style="align-items:center"><span style="flex:1">${esc(a.title)}</span><span class=mv><button onclick="mv(${a.id},-1)">↑</button><button onclick="mv(${a.id},1)">↓</button></span></div>`;
-  return `<div class=item onclick="openA(${a.id})"><span>${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}</span>${tag(a)}</div>`;
+  return `<div class=item onclick="openA(${a.id})"><span>${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}${a.files&&a.files.length?' 📎':''}</span>${tag(a)}</div>`;
 }
 async function mv(id,dir){
   const a=D.articles.find(x=>x.id===id);
