@@ -40,6 +40,21 @@ img{max-width:100%;margin:10px 0;border-radius:16px;display:block}
 input[type=radio],input[type=checkbox]{width:22px;height:22px;padding:0;margin:0 10px 0 0;flex:none;accent-color:var(--accd)}
 .mv button{min-height:34px;padding:0 14px;margin-left:6px}
 .opt{display:flex;align-items:center;padding:7px 0;font:300 16px Montserrat,system-ui,sans-serif}
+.ed{min-height:260px;padding:14px 16px;margin:6px 0;border:1px solid var(--greyb);border-radius:20px;background:var(--grey);outline:none;font:300 16px/1.4 Montserrat,system-ui,sans-serif}
+.tb{display:flex;gap:6px;overflow-x:auto;padding:6px 0;position:sticky;top:0;z-index:5;background:var(--bg)}
+.tb button{flex:none;min-height:36px;padding:0 11px;white-space:nowrap}
+.rich p{margin:0 0 .6em}.rich h2{margin:.8em 0 .4em;font-size:22px}.rich h3{margin:.8em 0 .3em;font-size:18px}
+.rich ul,.rich ol{margin:.3em 0 .6em;padding-left:1.4em}
+.rich blockquote{margin:.6em 0;padding:4px 14px;border-left:4px solid var(--acc);color:#3a2f27}
+.rich .note{margin:.6em 0;padding:10px 14px;border-radius:14px;background:rgba(214,160,124,.28);border:1px solid var(--cardb)}
+.rich ul.chk{list-style:none;padding-left:0}.rich ul.chk li::before{content:'☐ '}
+.rich hr{border:0;border-top:1px solid #cfc6b8;margin:1em 0}
+.rich a{color:var(--accd);text-decoration:underline}
+.rich .f-a{font-family:Arsenal,'Trebuchet MS',sans-serif;font-size:1.1em}
+.rich .f-c{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em}
+.rich .f-m{font-family:Montserrat,system-ui,sans-serif}
+.rich .sm{font-size:.85em}.rich .lg{font-size:1.3em}
+.abody.rich{white-space:normal}
 </style></head>
 <body>
 <div class="deco" style="width:249px;height:249px;border-radius:111px;right:-109px;top:-90px"></div>
@@ -105,29 +120,32 @@ function openA(id){
 }
 function article(m){
   articleBase(m);
+  $.querySelectorAll('.rich a').forEach(l=>l.onclick=ev=>{ev.preventDefault();/^https:\/\/t\.me\//.test(l.href)?tg.openTelegramLink(l.href):tg.openLink(l.href)});
   if(D.trainee&&D.trainee.canTest&&D.trainee.hasQuiz)$.insertAdjacentHTML('beforeend','<div class=card style="cursor:default"><b>Все статьи этапа открыты</b><br><button class=main style="margin-top:8px" onclick="go(\'quiz\')">Пройти тест</button></div>');
 }
 function articleBase(m){
   const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
-  $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div><div class=abody>${esc(a.body)}</div>`+
+  $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div>${a.body_html?`<div class="abody rich">${clean(a.body_html)}</div>`:`<div class=abody>${esc(a.body)}</div>`}`+
     a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+filesHtml(a)+'</div>'+
     (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
-function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],files:[],access:'staff',stage:0,notify:false,prev:{}};view={t:'edit'};render()}
+function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],files:[],html:'',access:'staff',stage:0,notify:false,prev:{}};view={t:'edit'};render()}
 function editA(id){
   const a=D.articles.find(x=>x.id===id);
-  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',files:(a.files||[]).map(f=>({...f})),stage:a.stage||0,notify:false,prev:{}};
+  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',files:(a.files||[]).map(f=>({...f})),html:a.body_html||plain(a.body),stage:a.stage||0,notify:false,prev:{}};
   a.images.forEach((n,i)=>E.prev[n]=a.imageUrls[i]);
   view={t:'edit'};render();
 }
 function edit(){
+  const cur=document.getElementById('ed');if(cur)E.html=cur.innerHTML;
   $.innerHTML=H+`<h2>${E.id?'Изменить':'Новая статья'}</h2>
   <select onchange="E.section_id=+this.value">${D.sections.map(s=>`<option value=${s.id} ${s.id===E.section_id?'selected':''}>${esc(s.title)}</option>`).join('')}</select>
   <select onchange="E.access=this.value"><option value=staff ${E.access==='staff'?'selected':''}>Видят: бариста</option><option value=partners ${E.access==='partners'?'selected':''}>Видят: партнёры</option><option value=all ${E.access==='all'?'selected':''}>Видят: все</option></select>
   <select onchange="E.stage=+this.value"><option value=0 ${!E.stage?'selected':''}>Стажёр не видит</option>${[1,2,3,4,5,6].map(n=>`<option value=${n} ${E.stage===n?'selected':''}>Стажёр: этап ${n}</option>`).join('')}</select>
   <input placeholder="Название" value="${esc(E.title)}" oninput="E.title=this.value">
-  <textarea rows=12 placeholder="Текст" oninput="E.body=this.value">${esc(E.body)}</textarea>
+  ${toolbar()}
+  <div id=ed class="ed rich" contenteditable=true oninput="E.html=this.innerHTML">${clean(E.html)}</div>
   ${E.images.map((n,i)=>`<div><img src="${E.prev[n]||''}"><button class=danger onclick="E.images.splice(${i},1);edit()">Убрать фото</button></div>`).join('')}
   <p class=hint>Добавить фото:</p><input type=file accept="image/*" multiple onchange="addImgs(this.files)">
   <p class=hint>Файлы для скачивания (PDF, Word):</p>
@@ -135,6 +153,7 @@ function edit(){
   <input type=file accept=".pdf,.doc,.docx,application/pdf" multiple onchange="addFiles(this.files)"><p id=fs class=hint></p>
   <label class=opt><input type=checkbox onchange="E.notify=this.checked">Отправить уведомление в Telegram</label>
   <div class=row><button class=main onclick="saveA()">Сохранить</button></div>`;
+  initEd();
 }
 function shrink(f){return new Promise(r=>{const i=new Image();i.onload=()=>{const k=Math.min(1,1200/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*k;c.height=i.height*k;c.getContext('2d').drawImage(i,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.8))};i.src=URL.createObjectURL(f)})}
 async function addImgs(files){
@@ -147,7 +166,8 @@ async function addImgs(files){
 }
 async function saveA(){
   if(!E.title.trim())return tg.showAlert('Впиши название');
-  const sv=await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,images:E.images,files:E.files.map(f=>({path:f.path,title:f.title,size:f.size})),access:E.access,stage:E.stage});
+  syncBody();
+  const sv=await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,body_html:E.html,images:E.images,files:E.files.map(f=>({path:f.path,title:f.title,size:f.size})),access:E.access,stage:E.stage});
   if(E.notify&&sv.id){const r=await act({action:'notify',article_id:sv.id,kind:E.id?'updated':'new'});report(r)}
   view={t:'list'};await load();
 }
@@ -204,6 +224,97 @@ function toggleP(id){
   el.style.display='block';
 }
 
+
+// ===== Редактор текста (жирный, курсив, заголовки, списки, плашки...) =====
+const plain=t=>String(t||'').split('\n').map(l=>l.trim()?'<p>'+esc(l)+'</p>':'<p><br></p>').join('');
+const DROP=new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','NOSCRIPT','TEMPLATE']);
+const TAGS={P:'p',BR:'br',B:'strong',STRONG:'strong',I:'em',EM:'em',U:'u',S:'s',STRIKE:'s',H1:'h2',H2:'h2',H3:'h3',UL:'ul',OL:'ol',LI:'li',BLOCKQUOTE:'blockquote',A:'a',HR:'hr',SPAN:'span',DIV:'div'};
+const OKC=new Set(['note','chk','f-a','f-c','f-m','sm','lg']);
+const COL=/^(#[0-9a-f]{3,8}|rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(,\s*[\d.]+\s*)?\))$/i;
+// Оставляем только безопасные теги и стили: чужой код в тексте не выполнится
+function clean(html){
+  const src=new DOMParser().parseFromString(String(html||''),'text/html').body;
+  const out=document.createElement('div');
+  (function walk(from,to){
+    for(const n of from.childNodes){
+      if(n.nodeType===3){to.appendChild(document.createTextNode(n.nodeValue));continue}
+      if(n.nodeType!==1||DROP.has(n.tagName))continue;
+      const t=TAGS[n.tagName];
+      if(!t){walk(n,to);continue}
+      const e=document.createElement(t);
+      if(t==='a'){
+        const u=n.getAttribute('href')||'';
+        if(!/^(https?:\/\/|tg:\/\/|mailto:)/i.test(u)){walk(n,to);continue}
+        e.setAttribute('href',u);e.setAttribute('rel','noopener');
+      }
+      n.classList.forEach(c=>{if(OKC.has(c))e.classList.add(c)});
+      if(t==='span'){
+        if(COL.test(n.style.color))e.style.color=n.style.color;
+        if(COL.test(n.style.backgroundColor))e.style.backgroundColor=n.style.backgroundColor;
+      }
+      if(/^(p|h2|h3|div)$/.test(t)&&/^(left|center|right)$/.test(n.style.textAlign))e.style.textAlign=n.style.textAlign;
+      walk(n,e);to.appendChild(e);
+    }
+  })(src,out);
+  return out.innerHTML;
+}
+const ED=()=>document.getElementById('ed');
+function inEd(){const s=getSelection();return s.rangeCount>0&&!!ED()&&ED().contains(s.anchorNode)}
+function cmd(c,v){
+  if(c!=='undo'&&c!=='redo'&&!inEd())return tg.showAlert('Сначала поставь курсор в текст статьи');
+  document.execCommand(c,false,v||null);E.html=ED().innerHTML;
+}
+function ins(html){
+  if(!inEd())return tg.showAlert('Сначала поставь курсор в текст статьи');
+  document.execCommand('insertHTML',false,html);E.html=ED().innerHTML;
+}
+function chkList(){ins('<ul class="chk"><li>'+esc(getSelection().toString().trim()||'пункт')+'</li></ul><p><br></p>')}
+function note(){ins('<div class="note">'+esc(getSelection().toString().trim()||'Важно: ')+'</div><p><br></p>')}
+function wrapSel(cls){
+  const s=getSelection();
+  if(!inEd()||s.isCollapsed)return tg.showAlert('Сначала выдели текст');
+  const d=document.createElement('div');d.appendChild(s.getRangeAt(0).cloneContents());
+  document.execCommand('insertHTML',false,'<span class="'+cls+'">'+d.innerHTML+'</span>');E.html=ED().innerHTML;
+}
+let SAVED=null;
+function linkAsk(){
+  const s=getSelection();
+  if(!inEd()||s.isCollapsed)return tg.showAlert('Сначала выдели текст для ссылки');
+  SAVED=s.getRangeAt(0).cloneRange();
+  document.getElementById('lk').style.display='flex';document.getElementById('lu').focus();
+}
+function linkOk(){
+  let u=document.getElementById('lu').value.trim();if(!u||!SAVED)return;
+  if(!/^(https?:\/\/|tg:\/\/|mailto:)/i.test(u))u='https://'+u;
+  const s=getSelection();s.removeAllRanges();s.addRange(SAVED);
+  document.execCommand('createLink',false,u);E.html=ED().innerHTML;
+  document.getElementById('lk').style.display='none';document.getElementById('lu').value='';
+}
+function initEd(){
+  const e=ED();if(!e)return;
+  e.onfocus=()=>{document.execCommand('styleWithCSS',false,true);document.execCommand('defaultParagraphSeparator',false,'p')};
+  e.onpaste=ev=>{ev.preventDefault();document.execCommand('insertText',false,(ev.clipboardData||window.clipboardData).getData('text/plain'))};
+}
+// Перед сохранением: чистим HTML и делаем простой текст для поиска
+function syncBody(){
+  const e=ED();if(e)E.html=e.innerHTML;
+  E.html=clean(E.html);
+  const t=document.createElement('div');
+  t.innerHTML=E.html.replace(/<\/(p|h2|h3|li|blockquote|div)>|<br\s*\/?>/gi,'$&\n');
+  E.body=(t.textContent||'').replace(/\n{3,}/g,'\n\n').trim();
+}
+const toolbar=()=>`<div class=tb onmousedown="event.preventDefault()">
+<button onclick="cmd('bold')"><b>Ж</b></button><button onclick="cmd('italic')"><i>К</i></button><button onclick="cmd('underline')"><u>Ч</u></button><button onclick="cmd('strikeThrough')"><s>З</s></button>
+<button onclick="cmd('formatBlock','<h2>')">Заголовок</button><button onclick="cmd('formatBlock','<h3>')">Подзаголовок</button><button onclick="cmd('formatBlock','<p>')">Текст</button>
+<button onclick="cmd('insertUnorderedList')">• Список</button><button onclick="cmd('insertOrderedList')">1. Список</button><button onclick="chkList()">☐ Чек-лист</button>
+<button onclick="cmd('formatBlock','<blockquote>')">« Цитата</button><button onclick="note()">❗ Плашка</button><button onclick="cmd('insertHorizontalRule')">— Линия</button>
+<button onclick="linkAsk()">🔗 Ссылка</button><button onclick="cmd('unlink')">Без ссылки</button>
+<button onclick="cmd('justifyLeft')">⇤</button><button onclick="cmd('justifyCenter')">↔</button>
+<button style="color:#b3764d" onclick="cmd('foreColor','#b3764d')"><b>A</b></button><button style="color:#c0392b" onclick="cmd('foreColor','#c0392b')"><b>A</b></button><button style="color:#2e7d32" onclick="cmd('foreColor','#2e7d32')"><b>A</b></button><button style="color:#1f5fbf" onclick="cmd('foreColor','#1f5fbf')"><b>A</b></button><button onclick="cmd('foreColor','#000000')"><b>A</b></button>
+<button style="background:#fff3b0" onclick="cmd('hiliteColor','#fff3b0')">Фон</button><button style="background:#f3cdb4" onclick="cmd('hiliteColor','#f3cdb4')">Фон</button>
+<button onclick="wrapSel('f-a')">Arsenal</button><button onclick="wrapSel('f-m')">Montserrat</button><button onclick="wrapSel('f-c')">Моно</button><button onclick="wrapSel('sm')">A−</button><button onclick="wrapSel('lg')">A+</button>
+<button onclick="cmd('removeFormat')">Очистить</button><button onclick="cmd('undo')">↶</button><button onclick="cmd('redo')">↷</button></div>
+<div id=lk class=row style="display:none"><input id=lu placeholder="Адрес ссылки"><button class=main onclick="linkOk()">OK</button></div>`;
 
 // ===== Файлы в статьях (PDF, Word) =====
 let FU=[];
