@@ -99,6 +99,7 @@ module.exports = async (req, res) => {
     else if (action === 'saveArticle') {
       const row = {
         section_id: d.section_id, title: d.title, body: d.body || '', images: d.images || [],
+        body_html: typeof d.body_html === 'string' ? d.body_html.slice(0, 200000) : null,
         access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
         stage: Math.max(0, Math.min(9, Number(d.stage) || 0)),
         files: (Array.isArray(d.files) ? d.files : [])
