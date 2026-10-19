@@ -83,9 +83,14 @@ module.exports = async (req, res) => {
       });
       const score = Math.round((ok / qs.length) * 100);
       const passed = score >= s.quiz.pass_percent;
-      chk(await db.from('quiz_attempts').insert({ telegram_id: me.telegram_id, stage: me.stage, score, passed }));
+      // Сохраняем, что именно отвечал стажёр (вопрос, его ответ, правильный ответ)
+      const detail = qs.map((x, i) => {
+        const a = Number(d.answers && d.answers[i]);
+        return { q: x.q, chosen: x.options[a] != null ? x.options[a] : '—', correct: x.options[x.correct], ok: a === x.correct };
+      });
+      chk(await db.from('quiz_attempts').insert({ telegram_id: me.telegram_id, stage: me.stage, score, passed, detail }));
       if (passed) chk(await db.from('users').update({ stage: me.stage + 1 }).eq('telegram_id', me.telegram_id));
-      return res.json({ ok: 1, score, passed, wrong });
+      return res.json({ ok: 1, score, passed, wrong, wrongQ: detail.filter((m) => !m.ok).map((m) => m.q) });
     }
 
     // Всё остальное только для редакторов
@@ -134,6 +139,86 @@ module.exports = async (req, res) => {
       if (!path.startsWith('files/') || !ext) throw new Error('Неверный файл');
       const types = { '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
       chk(await db.storage.from('images').upload(path, Buffer.from(d.data, 'base64'), { contentType: types[ext], upsert: true }));
+    }
+    else if (action === 'exportResults') {
+      // Выгрузка результатов тестов: Word (.doc) с разбором ошибок или Excel (.csv)
+      const tz = typeof d.tz === 'string' && d.tz.length < 60 ? d.tz : 'Europe/Moscow';
+      const fmt = (v) => {
+        try { return new Date(v).toLocaleString('ru-RU', { timeZone: tz, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+        catch (e) { return String(v); }
+      };
+      let att = [];
+      for (let i = 0; ; i += 1000) {
+        let q = db.from('quiz_attempts').select('telegram_id,stage,score,passed,created_at,detail')
+          .order('created_at', { ascending: true }).range(i, i + 999);
+        if (d.telegram_id) q = q.eq('telegram_id', d.telegram_id);
+        const x = chk(await q).data;
+        att = att.concat(x);
+        if (x.length < 1000) break;
+      }
+      if (!att.length) out.url = null;
+      else {
+        const names = {};
+        chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { names[u.telegram_id] = u.name; });
+        const nm = (id) => names[id] || ('ID ' + id);
+        const by = {};
+        att.forEach((a) => { (by[a.telegram_id] = by[a.telegram_id] || []).push(a); });
+        const ids = Object.keys(by).sort((a, b) => nm(a).localeCompare(nm(b), 'ru'));
+        const stamp = new Date().toISOString().slice(0, 10);
+        let body, ext, ctype;
+        if (d.format === 'csv') {
+          const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+          const rows = [['Стажёр', 'Этап', 'Дата', 'Результат, %', 'Итог', 'Ошибки']];
+          ids.forEach((id) => by[id].forEach((a) => rows.push([
+            nm(id), a.stage, fmt(a.created_at), a.score, a.passed ? 'сдан' : 'не сдан',
+            a.detail ? a.detail.filter((m) => !m.ok).map((m) => m.q + ' — ответил: ' + m.chosen + '; правильно: ' + m.correct).join('\n') : 'детали не сохранены',
+          ])));
+          body = '\ufeff' + rows.map((r) => r.map(q).join(';')).join('\r\n');
+          ext = 'csv'; ctype = 'text/csv; charset=utf-8';
+        } else {
+          const h = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          let html = '<h1>Результаты тестов стажёров</h1><p>Выгрузка от ' + h(fmt(new Date())) + '</p>';
+          html += '<h2>Сводка</h2><table><tr><th>Стажёр</th><th>Этап</th><th>Попыток</th><th>Лучший результат</th><th>Итог</th></tr>';
+          ids.forEach((id) => {
+            [...new Set(by[id].map((a) => a.stage))].sort((a, b) => a - b).forEach((g) => {
+              const a = by[id].filter((x) => x.stage === g);
+              const best = Math.max(...a.map((x) => x.score));
+              const okA = a.find((x) => x.passed);
+              html += '<tr><td>' + h(nm(id)) + '</td><td>' + g + '</td><td>' + a.length + '</td><td>' + best + '%</td><td>' + (okA ? 'сдан ' + h(fmt(okA.created_at)) : 'не сдан') + '</td></tr>';
+            });
+          });
+          html += '</table>';
+          ids.forEach((id) => {
+            html += '<h2>' + h(nm(id)) + '</h2>';
+            by[id].forEach((a) => {
+              html += '<h3>Этап ' + a.stage + ' — ' + h(fmt(a.created_at)) + ' — ' + a.score + '% (' + (a.passed ? 'сдан' : 'не сдан') + ')</h3>';
+              if (!a.detail) html += '<p><i>Детали этой попытки не сохранились.</i></p>';
+              else {
+                const w = a.detail.filter((m) => !m.ok);
+                if (!w.length) html += '<p>Ошибок нет.</p>';
+                else {
+                  html += '<table><tr><th>Вопрос</th><th>Ответ стажёра</th><th>Правильный ответ</th></tr>';
+                  w.forEach((m) => { html += '<tr><td>' + h(m.q) + '</td><td>' + h(m.chosen) + '</td><td>' + h(m.correct) + '</td></tr>'; });
+                  html += '</table>';
+                }
+              }
+            });
+          });
+          body = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Результаты тестов</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt}table{border-collapse:collapse;margin:6px 0 12px}td,th{border:1px solid #999;padding:4px 8px;vertical-align:top}th{background:#e9e2d8}h1{font-size:20pt}h2{font-size:15pt;margin-top:18pt}h3{font-size:12pt}</style></head><body>' + html + '</body></html>';
+          ext = 'doc'; ctype = 'application/msword';
+        }
+        // Удаляем выгрузки старше часа, чтобы не копились
+        try {
+          const old = await db.storage.from('images').list('exports', { limit: 100 });
+          const dead = (old.data || []).filter((f) => Date.now() - new Date(f.created_at).getTime() > 3600e3).map((f) => 'exports/' + f.name);
+          if (dead.length) await db.storage.from('images').remove(dead);
+        } catch (e) { /* не критично */ }
+        const path = 'exports/' + Date.now() + '.' + ext;
+        chk(await db.storage.from('images').upload(path, Buffer.from(body, 'utf8'), { contentType: ctype }));
+        const sg = await db.storage.from('images').createSignedUrl(path, 600, { download: 'test-results-' + stamp + '.' + ext });
+        if (sg.error) throw sg.error;
+        out.url = sg.data.signedUrl;
+      }
     }
     else if (action === 'notify') {
       // Уведомление в Telegram: об одной статье или свободное сообщение
@@ -203,7 +288,7 @@ module.exports = async (req, res) => {
       out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).order('section_id').order('sort_order').order('id')).data;
       let attempts = [];
       for (let i = 0; ; i += 1000) {
-        const x = chk(await db.from('quiz_attempts').select('telegram_id,stage,score,passed,created_at')
+        const x = chk(await db.from('quiz_attempts').select('id,telegram_id,stage,score,passed,created_at,detail')
           .order('created_at', { ascending: false }).range(i, i + 999)).data;
         attempts = attempts.concat(x);
         if (x.length < 1000) break;
