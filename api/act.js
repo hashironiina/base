@@ -65,10 +65,13 @@ module.exports = async (req, res) => {
 
     // Тест стажёра: вопросы без правильных ответов, проверка на сервере
     if (action === 'quizGet' || action === 'quizSubmit') {
-      if (me.role !== 'trainee') return res.status(403).json({ error: 'trainee_only' });
-      const s = await stageState(me);
+      // Редактор может «примерить» тест стажёра в режиме просмотра: ответы не сохраняются
+      const pv = me.role === 'admin' && Number(d.preview_stage) > 0;
+      if (me.role !== 'trainee' && !pv) return res.status(403).json({ error: 'trainee_only' });
+      const eff = pv ? { ...me, stage: Number(d.preview_stage) } : me;
+      const s = await stageState(eff);
       if (!s.hasQuiz) return res.status(400).json({ error: 'no_quiz' });
-      if (!s.allRead) return res.status(400).json({ error: 'read_first' });
+      if (!pv && !s.allRead) return res.status(400).json({ error: 'read_first' });
       if (action === 'quizGet') {
         return res.json({
           ok: 1, title: s.quiz.title, pass_percent: s.quiz.pass_percent,
@@ -88,9 +91,11 @@ module.exports = async (req, res) => {
         const a = Number(d.answers && d.answers[i]);
         return { q: x.q, chosen: x.options[a] != null ? x.options[a] : '—', correct: x.options[x.correct], ok: a === x.correct };
       });
-      chk(await db.from('quiz_attempts').insert({ telegram_id: me.telegram_id, stage: me.stage, score, passed, detail }));
-      if (passed) chk(await db.from('users').update({ stage: me.stage + 1 }).eq('telegram_id', me.telegram_id));
-      return res.json({ ok: 1, score, passed, wrong, wrongQ: detail.filter((m) => !m.ok).map((m) => m.q) });
+      if (!pv) {
+        chk(await db.from('quiz_attempts').insert({ telegram_id: me.telegram_id, stage: me.stage, score, passed, detail }));
+        if (passed) chk(await db.from('users').update({ stage: me.stage + 1 }).eq('telegram_id', me.telegram_id));
+      }
+      return res.json({ ok: 1, score, passed, wrong, preview: pv, wrongQ: detail.filter((m) => !m.ok).map((m) => m.q) });
     }
 
     // Всё остальное только для редакторов
