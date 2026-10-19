@@ -9,8 +9,15 @@ const VISIBLE = {
 };
 
 module.exports = async (req, res) => {
-  const me = await auth(req);
-  if (!me) return res.status(403).json({ error: 'no_access' });
+  const real = await auth(req);
+  if (!real) return res.status(403).json({ error: 'no_access' });
+
+  // Режим «Посмотреть как»: только для редактора, только просмотр (ничего не сохраняется)
+  const q = req.query || {};
+  const as = real.role === 'admin' && ['reader', 'trainee', 'partner'].includes(q.as) ? q.as : null;
+  const me = as
+    ? { ...real, role: as, stage: as === 'trainee' ? Math.max(1, Number(q.stage) || 1) : real.stage }
+    : real;
   const levels = VISIBLE[me.role] || ['all'];
 
   let aq = db.from('articles').select('*').in('access', levels).order('sort_order').order('id');
@@ -20,7 +27,7 @@ module.exports = async (req, res) => {
   const [s, a, r] = await Promise.all([
     db.from('sections').select('*').order('sort_order'),
     aq,
-    db.from('reads').select('article_id').eq('telegram_id', me.telegram_id),
+    as ? Promise.resolve({ data: [] }) : db.from('reads').select('article_id').eq('telegram_id', me.telegram_id),
   ]);
 
   const articles = a.data || [];
@@ -43,7 +50,8 @@ module.exports = async (req, res) => {
       stage: me.stage,
       max,
       done: max > 0 && me.stage > max,
-      canTest: cur.length > 0 && cur.every((x) => readSet.has(x.id)),
+      // В режиме просмотра тест доступен сразу, чтобы редактор мог его попробовать
+      canTest: cur.length > 0 && (as ? true : cur.every((x) => readSet.has(x.id))),
       hasQuiz: n > 0,
     };
   }
@@ -65,6 +73,7 @@ module.exports = async (req, res) => {
 
   res.json({
     me: { id: me.telegram_id, name: me.name, role: me.role },
+    preview: as ? { as, stage: me.stage } : null,
     trainee,
     sections,
     articles: articles.map((x) => ({
