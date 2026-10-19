@@ -91,7 +91,7 @@ async function load(){
 function render(){
   const m=D.me.role==='admin';
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats})[view.t]();
 }
 
 function list(m){
@@ -186,10 +186,12 @@ function delS(id){tg.showConfirm('Удалить раздел вместе со 
 async function users(){
   $.innerHTML=H+'Загрузка…';
   const {users:U}=await act({action:'listUsers'});
-  $.innerHTML=H+'<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${lab(u)}<br><small class=hint>${u.telegram_id}</small></span>${u.role==='trainee'?`<button onclick="stg(${u.telegram_id},${u.stage-1})">−</button><button onclick="stg(${u.telegram_id},${u.stage+1})">+</button>`:''}<button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
+  $.innerHTML=H+'<h2>Люди с доступом</h2>'+U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${lab(u)}<br><small class=hint>${u.telegram_id}</small></span>${roleSel(u)}${u.role==='trainee'?`<button onclick="stg(${u.telegram_id},${u.stage-1})">−</button><button onclick="stg(${u.telegram_id},${u.stage+1})">+</button>`:''}<button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('')+
   `<h3>Добавить</h3><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=trainee>Стажёр</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select><div class=row><button class=main onclick="addU()">Добавить</button></div><p class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</p>`;
 }
 const lab=u=>u.role==='admin'?'редактор':u.role==='partner'?'партнёр':u.role==='trainee'?`стажёр · этап ${u.stage}`:'читает';
+const roleSel=u=>u.telegram_id===D.me.id?'':`<select style="width:auto;margin:0" onchange="setRole(${u.telegram_id},this.value)">${[['reader','Читает'],['trainee','Стажёр'],['partner','Партнёр'],['admin','Редактор']].map(([v,t])=>`<option value=${v} ${u.role===v?'selected':''}>${t}</option>`).join('')}</select>`;
+async function setRole(id,role){await act({action:'setRole',telegram_id:id,role});users()}
 async function stg(id,s){if(s<1)return;await act({action:'setStage',telegram_id:id,stage:s});users()}
 async function addU(){
   const n=un.value.trim(),i=ui.value.trim();
@@ -417,18 +419,18 @@ async function quizzes(){
   const {quizzes:Q}=await act({action:'quizList'});window.QL=Q;
   $.innerHTML=H+'<h2>Тесты</h2><p class=hint>Тест привязан к этапу: стажёр сдаёт его, чтобы открыть следующий этап. Если у этапа нет теста, он откроется сам, когда стажёр откроет все его статьи.</p>'+
     Q.map(x=>`<div class=card onclick="editQ(${x.stage})"><b>Этап ${x.stage}</b> — ${esc(x.title||'Тест')}<br><small class=hint>вопросов: ${(x.questions||[]).length}, порог ${x.pass_percent}%</small></div>`).join('')+
-    '<div class=row><button class=main onclick="editQ(0)">+ Новый тест</button></div>';
+    '<div class=row><button class=main onclick="editQ(0)">+ Новый тест</button><button onclick="go(\'qstats\')">Ошибки по вопросам</button></div>';
 }
 function editQ(stage){
   const x=stage&&QL.find(y=>y.stage===stage);
   const used=new Set(QL.map(y=>y.stage));let free=1;while(used.has(free))free++;
-  QE=x?{stage:x.stage,isNew:false,title:x.title,pass_percent:x.pass_percent,questions:JSON.parse(JSON.stringify(x.questions))}
+  QE=x?{stage:x.stage,orig:x.stage,isNew:false,title:x.title,pass_percent:x.pass_percent,questions:JSON.parse(JSON.stringify(x.questions))}
       :{stage:free,isNew:true,title:'',pass_percent:80,questions:[{q:'',options:['','','',''],correct:0}]};
   view={t:'qedit'};render();
 }
 function qedit(){
   $.innerHTML=H+'<h2>Тест этапа</h2>'+
-  (QE.isNew?`<select onchange="QE.stage=+this.value">${[1,2,3,4,5,6].map(n=>`<option value=${n} ${n===QE.stage?'selected':''}>Этап ${n}</option>`).join('')}</select>`:`<p><b>Этап ${QE.stage}</b></p>`)+
+  `<p class=hint>Этап, к которому привязан тест${QE.isNew?'':' (можно перенести, если на новом этапе ещё нет теста)'}:</p><select onchange="QE.stage=+this.value">${[1,2,3,4,5,6].map(n=>`<option value=${n} ${n===QE.stage?'selected':''}>Этап ${n}</option>`).join('')}</select>`+
   `<input placeholder="Название теста" value="${esc(QE.title)}" oninput="QE.title=this.value">
   <input placeholder="Порог, %" inputmode=numeric value="${QE.pass_percent}" oninput="QE.pass_percent=+this.value||80">`+
   QE.questions.map((x,i)=>`<div class=card style="cursor:default"><input placeholder="Вопрос ${i+1}" value="${esc(x.q)}" oninput="QE.questions[${i}].q=this.value">`+
@@ -438,10 +440,10 @@ function qedit(){
   <div class=row><button class=main onclick="saveQ()">Сохранить</button>${QE.isNew?'':'<button class=danger onclick="delQ()">Удалить тест</button>'}</div>`;
 }
 async function saveQ(){
-  await act({action:'quizSave',stage:QE.stage,title:QE.title,pass_percent:QE.pass_percent,questions:QE.questions});
+  await act({action:'quizSave',old_stage:QE.isNew?undefined:QE.orig,stage:QE.stage,title:QE.title,pass_percent:QE.pass_percent,questions:QE.questions});
   go('quizzes');
 }
-function delQ(){tg.showConfirm('Удалить тест этого этапа?',async ok=>{if(!ok)return;await act({action:'quizDelete',stage:QE.stage});go('quizzes')})}
+function delQ(){tg.showConfirm('Удалить тест этого этапа?',async ok=>{if(!ok)return;await act({action:'quizDelete',stage:QE.isNew?QE.stage:QE.orig});go('quizzes')})}
 const dt=s=>new Date(s).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 let TA=[];
 async function exportRes(fmt,id){
@@ -452,11 +454,32 @@ async function exportRes(fmt,id){
 function trBlock(P,by){
   if(!P.trainees.length)return'';
   TA=P.attempts;
-  return '<h3>Стажёры</h3><p class=hint>Нажми на имя, чтобы увидеть попытки и ошибки.</p><div class=row><button onclick="exportRes(\'doc\')">Выгрузить в Word</button><button onclick="exportRes(\'csv\')">Выгрузить в Excel</button></div>'+P.trainees.map(t=>{
+  return '<h3>Стажёры</h3><p class=hint>Нажми на имя, чтобы увидеть попытки и ошибки.</p><div class=row><button onclick="exportRes(\'doc\')">Выгрузить в Word</button><button onclick="exportRes(\'csv\')">Выгрузить в Excel</button><button onclick="go(\'qstats\')">Ошибки по вопросам</button></div>'+P.trainees.map(t=>{
     const av=P.articles.filter(a=>a.stage>=1&&a.stage<=t.stage),s=by[t.telegram_id]||new Set();
     const n=av.filter(a=>s.has(a.id)).length,my=P.attempts.filter(x=>x.telegram_id===t.telegram_id),at=my[0];
     return `<div class=card onclick="toggleT(${t.telegram_id})"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>открыто ${n} из ${av.length} · попыток теста: ${my.length}${at?` · последняя: ${at.score}% (${at.passed?'сдан':'не сдан'})`:''}</small><div id="t${t.telegram_id}" style="display:none" onclick="event.stopPropagation()"></div></div>`;
   }).join('');
+}
+async function qstats(){
+  $.innerHTML=H+'Загрузка…';
+  const P=await act({action:'progress'});
+  const by={};
+  P.attempts.forEach(a=>{
+    if(!a.detail)return;
+    a.detail.forEach(m=>{
+      const k=a.stage+'|'+m.q,o=by[k]=by[k]||{stage:a.stage,q:m.q,n:0,bad:0,who:{},ans:{}};
+      o.n++;
+      if(!m.ok){o.bad++;const w=P.names[a.telegram_id]||('ID '+a.telegram_id);o.who[w]=(o.who[w]||0)+1;o.ans[m.chosen]=(o.ans[m.chosen]||0)+1}
+    });
+  });
+  const rows=Object.values(by).filter(o=>o.bad>0).sort((a,b)=>a.stage-b.stage||b.bad/b.n-a.bad/a.n);
+  let h=H+'<h2>Ошибки по вопросам</h2><p class=hint>Самые трудные вопросы каждого этапа сверху. Считаются все попытки стажёров, у которых сохранились ответы.</p>',last=0;
+  rows.forEach(o=>{
+    if(o.stage!==last){h+=`<h3>Этап ${o.stage}</h3>`;last=o.stage}
+    const top=Object.entries(o.ans).sort((a,b)=>b[1]-a[1])[0];
+    h+=`<div class=card style="cursor:default"><b>${esc(o.q)}</b><br><small class=hint>ошибок: ${o.bad} из ${o.n} ответов (${Math.round(o.bad/o.n*100)}%)</small><br>Чаще всего отвечали: ${esc(top[0])} (${top[1]})<br><small class=hint>Ошиблись: ${Object.entries(o.who).map(([w,c])=>esc(w)+(c>1?' ×'+c:'')).join(', ')}</small></div>`;
+  });
+  $.innerHTML=h+(rows.length?'':'<p class=hint>Пока нет ошибок, либо попытки сделаны до обновления и ответы не сохранились.</p>');
 }
 function mistakes(x){
   if(!x.detail)return'<p class=hint>Детали этой попытки не сохранились (она была до обновления).</p>';
