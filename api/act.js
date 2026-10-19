@@ -259,6 +259,11 @@ module.exports = async (req, res) => {
       telegram_id: Number(d.telegram_id), name: d.name,
       role: ['admin', 'partner', 'trainee'].includes(d.role) ? d.role : 'reader',
     }));
+    else if (action === 'setRole') {
+      if (Number(d.telegram_id) === me.telegram_id) throw new Error('Свою роль менять нельзя');
+      if (!['admin', 'reader', 'partner', 'trainee'].includes(d.role)) throw new Error('Неверная роль');
+      chk(await db.from('users').update({ role: d.role }).eq('telegram_id', d.telegram_id));
+    }
     else if (action === 'setStage') chk(await db.from('users')
       .update({ stage: Math.max(1, Number(d.stage) || 1) }).eq('telegram_id', d.telegram_id));
     else if (action === 'deleteUser') {
@@ -275,15 +280,26 @@ module.exports = async (req, res) => {
         return { q: String(x.q).trim(), options: opts, correct: c };
       });
       if (!qs.length) throw new Error('Добавь хотя бы один вопрос');
-      chk(await db.from('quizzes').upsert({
-        stage: Math.max(1, Number(d.stage) || 1), title: d.title || '',
+      const stage = Math.max(1, Number(d.stage) || 1);
+      const row = {
+        stage, title: d.title || '',
         pass_percent: Math.max(1, Math.min(100, Number(d.pass_percent) || 80)), questions: qs,
-      }, { onConflict: 'stage' }));
+      };
+      const old = Number(d.old_stage) || 0;
+      if (old && old !== stage) {
+        // Перенос теста на другой этап: целевой этап должен быть свободен
+        const clash = chk(await db.from('quizzes').select('id').eq('stage', stage)).data;
+        if (clash.length) throw new Error('На этапе ' + stage + ' уже есть тест. Выбери свободный этап или сначала удали тот тест');
+        chk(await db.from('quizzes').update(row).eq('stage', old));
+      } else chk(await db.from('quizzes').upsert(row, { onConflict: 'stage' }));
     }
     else if (action === 'quizDelete') chk(await db.from('quizzes').delete().eq('stage', Number(d.stage)));
     else if (action === 'progress') {
       // Кто какие статьи открывал: бариста («читает») и стажёры
       out.users = chk(await db.from('users').select('telegram_id,name').eq('role', 'reader').order('name')).data;
+      const nmap = {};
+      chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { nmap[u.telegram_id] = u.name; });
+      out.names = nmap;
       out.trainees = chk(await db.from('users').select('telegram_id,name,stage').eq('role', 'trainee').order('name')).data;
       out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).order('section_id').order('sort_order').order('id')).data;
       let attempts = [];
