@@ -409,7 +409,7 @@ async function sendQuiz(){
   if(QZ.questions.some((_,i)=>QZ.ans[i]===undefined))return tg.showAlert('Ответь на все вопросы');
   const r=await act({action:'quizSubmit',answers:QZ.questions.map((_,i)=>QZ.ans[i])});
   $.innerHTML=H+`<h2>${r.passed?'Тест сдан 🎉':'Пока не сдан'}</h2><p>Результат: ${r.score}%</p>`+
-    (r.passed?'<p>Открылся следующий этап.</p>':`<p>Ошибки в вопросах: ${r.wrong.join(', ')}. Перечитай статьи этапа и попробуй ещё раз.</p>`)+
+    (r.passed?'<p>Открылся следующий этап.</p>':`<p>Вопросы с ошибками:</p>${(r.wrongQ||[]).map(q=>'<div class=card style="cursor:default">'+esc(q)+'</div>').join('')}<p>Перечитай статьи этапа и попробуй ещё раз.</p>`)+
     '<div class=row><button class=main onclick="view={t:\'list\'};load()">К статьям</button></div>';
 }
 async function quizzes(){
@@ -444,15 +444,27 @@ async function saveQ(){
 function delQ(){tg.showConfirm('Удалить тест этого этапа?',async ok=>{if(!ok)return;await act({action:'quizDelete',stage:QE.stage});go('quizzes')})}
 const dt=s=>new Date(s).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 let TA=[];
+async function exportRes(fmt,id){
+  const r=await act({action:'exportResults',format:fmt,telegram_id:id||undefined,tz:Intl.DateTimeFormat().resolvedOptions().timeZone});
+  if(!r.url)return tg.showAlert('Нечего выгружать: попыток теста пока нет');
+  tg.openLink(r.url);
+}
 function trBlock(P,by){
   if(!P.trainees.length)return'';
   TA=P.attempts;
-  return '<h3>Стажёры</h3><p class=hint>Нажми на имя, чтобы увидеть все попытки теста.</p>'+P.trainees.map(t=>{
+  return '<h3>Стажёры</h3><p class=hint>Нажми на имя, чтобы увидеть попытки и ошибки.</p><div class=row><button onclick="exportRes(\'doc\')">Выгрузить в Word</button><button onclick="exportRes(\'csv\')">Выгрузить в Excel</button></div>'+P.trainees.map(t=>{
     const av=P.articles.filter(a=>a.stage>=1&&a.stage<=t.stage),s=by[t.telegram_id]||new Set();
     const n=av.filter(a=>s.has(a.id)).length,my=P.attempts.filter(x=>x.telegram_id===t.telegram_id),at=my[0];
-    return `<div class=card onclick="toggleT(${t.telegram_id})"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>открыто ${n} из ${av.length} · попыток теста: ${my.length}${at?` · последняя: ${at.score}% (${at.passed?'сдан':'не сдан'})`:''}</small><div id="t${t.telegram_id}" style="display:none"></div></div>`;
+    return `<div class=card onclick="toggleT(${t.telegram_id})"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>открыто ${n} из ${av.length} · попыток теста: ${my.length}${at?` · последняя: ${at.score}% (${at.passed?'сдан':'не сдан'})`:''}</small><div id="t${t.telegram_id}" style="display:none" onclick="event.stopPropagation()"></div></div>`;
   }).join('');
 }
+function mistakes(x){
+  if(!x.detail)return'<p class=hint>Детали этой попытки не сохранились (она была до обновления).</p>';
+  const w=x.detail.filter(m=>!m.ok);
+  if(!w.length)return'<p class=hint>Ошибок нет.</p>';
+  return w.map(m=>`<div style="margin:6px 0 10px;padding-left:10px;border-left:3px solid var(--acc)"><b>${esc(m.q)}</b><br>Ответил: ${esc(m.chosen)}<br>Правильно: ${esc(m.correct)}</div>`).join('');
+}
+function toggleM(id){const e=document.getElementById('m'+id);e.style.display=e.style.display==='block'?'none':'block'}
 function toggleT(id){
   const el=document.getElementById('t'+id);
   if(el.style.display==='block'){el.style.display='none';return}
@@ -460,10 +472,10 @@ function toggleT(id){
   if(!my.length)el.innerHTML='<p class=hint>Тесты ещё не проходил.</p>';
   else{
     const st=[...new Set(my.map(x=>x.stage))].sort((x,y)=>x-y);
-    el.innerHTML=st.map(g=>{
+    el.innerHTML=`<div class=row><button onclick="exportRes('doc',${id})">Выгрузить по стажёру (Word)</button></div>`+st.map(g=>{
       const a=my.filter(x=>x.stage===g),best=Math.max(...a.map(x=>x.score)),ok=a.find(x=>x.passed);
       return `<p><b>Этап ${g}:</b> попыток ${a.length}, лучший результат ${best}%, ${ok?'сдан '+dt(ok.created_at):'не сдан'}</p>`+
-        a.slice().reverse().map(x=>`<div class=hint>${dt(x.created_at)} — ${x.score}% ${x.passed?'✓ сдан':'✗ не сдан'}</div>`).join('');
+        a.slice().reverse().map(x=>`<div class=hint style="cursor:pointer;padding:3px 0" onclick="toggleM(${x.id})">${dt(x.created_at)} — ${x.score}% ${x.passed?'✓ сдан':'✗ не сдан'}${x.detail?` · ошибок: ${x.detail.filter(m=>!m.ok).length} ▾`:''}</div><div id="m${x.id}" style="display:none">${mistakes(x)}</div>`).join('');
     }).join('');
   }
   el.style.display='block';
