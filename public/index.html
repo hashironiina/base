@@ -77,7 +77,7 @@ async function api(url,body){
   if(!r.ok)throw new Error(j.error||r.status);
   return j;
 }
-const ERR={read_first:'Сначала открой все статьи этапа',no_quiz:'Для этого этапа нет теста',trainee_only:'Тест только для стажёров'};
+const ERR={read_first:'Сначала отметь все статьи этапа как прочитанные',no_quiz:'Для этого этапа нет теста',trainee_only:'Тест только для стажёров'};
 const act=async b=>{try{return await api('/api/act',b)}catch(e){tg.showAlert(ERR[e.message]||('Ошибка: '+e.message));throw e}};
 const go=t=>{view={t};render()};
 tg.BackButton.onClick(()=>{view={t:'list'};render()});
@@ -118,13 +118,14 @@ function results(){
 function tgl(id){OPEN.has(id)?OPEN.delete(id):OPEN.add(id);results()}
 
 function openA(id){
-  if(!D.preview&&!D.read.includes(id)){D.read.push(id);tcheck();api('/api/act',{action:'read',article_id:id}).then(r=>{if(r.advanced){tg.showAlert('Открылся следующий этап!');load()}}).catch(()=>{})}
+  if(!D.preview&&D.me.role!=='trainee'&&!D.read.includes(id)){D.read.push(id);tcheck();api('/api/act',{action:'read',article_id:id}).then(r=>{if(r.advanced){tg.showAlert('Открылся следующий этап!');load()}}).catch(()=>{})}
   view={t:'article',id};render();
 }
 function article(m){
   articleBase(m);
   $.querySelectorAll('.rich a').forEach(l=>l.onclick=ev=>{ev.preventDefault();/^https:\/\/t\.me\//.test(l.href)?tg.openTelegramLink(l.href):tg.openLink(l.href)});
-  if(D.trainee&&D.trainee.canTest&&D.trainee.hasQuiz)$.insertAdjacentHTML('beforeend','<div class=card style="cursor:default"><b>Все статьи этапа открыты</b><br><button class=main style="margin-top:8px" onclick="go(\'quiz\')">Пройти тест</button></div>');
+  $.insertAdjacentHTML('beforeend',readBlock(D.articles.find(x=>x.id===view.id)));
+  if(D.trainee&&D.trainee.canTest&&D.trainee.hasQuiz)$.insertAdjacentHTML('beforeend','<div class=card style="cursor:default"><b>Все статьи этапа прочитаны</b><br><button class=main style="margin-top:8px" onclick="go(\'quiz\')">Пройти тест</button></div>');
 }
 function articleBase(m){
   const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
@@ -390,6 +391,21 @@ async function mv(id,dir){
   try{await api('/api/act',{action:'reorder',ids:arr.map(x=>x.id)})}catch(e){tg.showAlert('Не удалось сохранить порядок');load()}
 }
 
+// ===== Стажёр: подтверждение «прочитано» кнопкой =====
+function readBlock(a){
+  if(!a||D.me.role!=='trainee')return'';
+  const done=D.read.includes(a.id);
+  return '<div class=row style="margin-top:14px">'+(done?'<button disabled style="opacity:.7">✓ Прочитано</button>':`<button class=main onclick="markRead(${a.id})">Отметить как прочитанное</button>`)+'</div>';
+}
+async function markRead(id){
+  if(D.preview)return tg.showAlert('Режим просмотра: отметка не сохраняется');
+  const r=await act({action:'read',article_id:id});
+  if(!D.read.includes(id))D.read.push(id);
+  tcheck();
+  if(r.advanced){tg.showAlert('Открылся следующий этап!');await load();return}
+  render();
+}
+
 // ===== Просмотр приложения глазами других ролей (только редактор) =====
 const PVL={reader:'Бариста',trainee:'Стажёр',partner:'Партнёр'};
 function pvBar(){
@@ -417,7 +433,7 @@ function banner(){
   const c=x=>`<div class=card style="cursor:default">${x}</div>`;
   if(!t.max)return c('Для тебя пока нет материалов. Напиши шеф-баристе.');
   if(t.done)return c('Обучение пройдено 🎉');
-  return c(`<b>Этап ${t.stage} из ${t.max}</b><br>`+(t.hasQuiz?(t.canTest?`<button class=main style="margin-top:8px" onclick="go('quiz')">Пройти тест</button>`:'<span class=hint>Открой все статьи этапа, чтобы пройти тест.</span>'):'<span class=hint>Открой все статьи этапа, и следующий откроется сам.</span>'));
+  return c(`<b>Этап ${t.stage} из ${t.max}</b><br>`+(t.hasQuiz?(t.canTest?`<button class=main style="margin-top:8px" onclick="go('quiz')">Пройти тест</button>`:'<span class=hint>Отметь все статьи этапа как прочитанные, чтобы пройти тест.</span>'):'<span class=hint>Отметь все статьи этапа как прочитанные, и следующий откроется сам.</span>'));
 }
 async function quiz(){
   $.innerHTML=H+'Загрузка…';
@@ -476,7 +492,7 @@ function trBlock(P,by){
   return '<h3>Стажёры</h3><p class=hint>Нажми на имя, чтобы увидеть попытки и ошибки.</p><div class=row><button onclick="exportRes(\'doc\')">Выгрузить в Word</button><button onclick="exportRes(\'csv\')">Выгрузить в Excel</button><button onclick="go(\'qstats\')">Ошибки по вопросам</button></div>'+P.trainees.map(t=>{
     const av=P.articles.filter(a=>a.stage>=1&&a.stage<=t.stage),s=by[t.telegram_id]||new Set();
     const n=av.filter(a=>s.has(a.id)).length,my=P.attempts.filter(x=>x.telegram_id===t.telegram_id),at=my[0];
-    return `<div class=card onclick="toggleT(${t.telegram_id})"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>открыто ${n} из ${av.length} · попыток теста: ${my.length}${at?` · последняя: ${at.score}% (${at.passed?'сдан':'не сдан'})`:''}</small><div id="t${t.telegram_id}" style="display:none" onclick="event.stopPropagation()"></div></div>`;
+    return `<div class=card onclick="toggleT(${t.telegram_id})"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>прочитано ${n} из ${av.length} · попыток теста: ${my.length}${at?` · последняя: ${at.score}% (${at.passed?'сдан':'не сдан'})`:''}</small><div id="t${t.telegram_id}" style="display:none" onclick="event.stopPropagation()"></div></div>`;
   }).join('');
 }
 async function qstats(){
