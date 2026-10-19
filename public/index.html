@@ -10,7 +10,7 @@
 :root{--bg:#e9e2d8;--acc:#d6a07c;--accd:#b3764d;--card:#e2d0c3;--cardb:#d9bda9;--grey:#ddd6cc;--greyb:#a8a095;--hint:#6e675e;color-scheme:light}
 *{box-sizing:border-box}
 html{background:var(--bg)}
-body{margin:0;padding:12px 16px 48px;min-height:100vh;overflow-x:hidden;background:var(--bg);color:#000;font:300 16px/1.35 Montserrat,system-ui,sans-serif}
+body{margin:0;padding:12px 16px 80px;min-height:100vh;overflow-x:hidden;background:var(--bg);color:#000;font:300 16px/1.35 Montserrat,system-ui,sans-serif}
 .deco{position:fixed;pointer-events:none;z-index:0;border:5px solid var(--acc);opacity:.2}
 #app{position:relative;z-index:1}
 .brand{margin:0 0 14px -16px;width:190px;max-width:70%;height:56px;border-radius:0 28px 28px 0;background:var(--acc);color:#fff;text-align:center;font:700 29px/56px Arsenal,'Trebuchet MS',sans-serif;cursor:pointer}
@@ -55,6 +55,8 @@ input[type=radio],input[type=checkbox]{width:22px;height:22px;padding:0;margin:0
 .rich .f-m{font-family:Montserrat,system-ui,sans-serif}
 .rich .sm{font-size:.85em}.rich .lg{font-size:1.3em}
 .abody.rich{white-space:normal}
+#pvbar{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#3a2f27;color:#fff;font:400 15px Arsenal,'Trebuchet MS',sans-serif}
+#pvbar button{min-height:34px;background:#d6a07c;border-color:#b3764d;color:#000}
 </style></head>
 <body>
 <div class="deco" style="width:249px;height:249px;border-radius:111px;right:-109px;top:-90px"></div>
@@ -67,7 +69,7 @@ const tg=Telegram.WebApp;tg.ready();tg.expand();
 try{tg.setHeaderColor('#e9e2d8');tg.setBackgroundColor('#e9e2d8')}catch(e){}
 const $=document.getElementById('app');
 const H='<div class="brand" onclick="view={t:\'list\'};render()">Юмадиль</div>';
-let D,E,PR,QZ,QE,ORD=false,q='',view={t:'list'};const OPEN=new Set();
+let D,E,PR,QZ,QE,PV=null,ORD=false,q='',view={t:'list'};const OPEN=new Set();
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(url,body){
   const r=await fetch(url,{method:body?'POST':'GET',headers:{'x-init-data':tg.initData,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
@@ -81,7 +83,7 @@ const go=t=>{view={t};render()};
 tg.BackButton.onClick(()=>{view={t:'list'};render()});
 
 async function load(){
-  try{D=await api('/api/data')}catch(e){
+  try{D=await api('/api/data'+(PV?'?as='+PV.as+'&stage='+(PV.stage||1):''))}catch(e){
     const id=tg.initDataUnsafe?.user?.id||'';
     $.innerHTML=H+`<h2>Нет доступа</h2><p>Попроси шеф-баристу добавить тебя в список.</p><p class=hint>Твой Telegram ID: ${id}</p>`;return;
   }
@@ -90,13 +92,14 @@ async function load(){
 }
 function render(){
   const m=D.me.role==='admin';
+  pvBar();
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview})[view.t]();
 }
 
 function list(m){
   $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button></div>`:'')+
+    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button></div>`:'')+
     '<div id=res></div>';
   results();
 }
@@ -115,7 +118,7 @@ function results(){
 function tgl(id){OPEN.has(id)?OPEN.delete(id):OPEN.add(id);results()}
 
 function openA(id){
-  if(!D.read.includes(id)){D.read.push(id);tcheck();api('/api/act',{action:'read',article_id:id}).then(r=>{if(r.advanced){tg.showAlert('Открылся следующий этап!');load()}}).catch(()=>{})}
+  if(!D.preview&&!D.read.includes(id)){D.read.push(id);tcheck();api('/api/act',{action:'read',article_id:id}).then(r=>{if(r.advanced){tg.showAlert('Открылся следующий этап!');load()}}).catch(()=>{})}
   view={t:'article',id};render();
 }
 function article(m){
@@ -354,7 +357,7 @@ async function uploadFile(f){
 
 // ===== Уведомления в Telegram =====
 function askWrite(){
-  try{if(D.me.role!=='admin'&&!localStorage.getItem('wa')&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.9')){localStorage.setItem('wa','1');tg.requestWriteAccess()}}catch(e){}
+  try{if(!D.preview&&D.me.role!=='admin'&&!localStorage.getItem('wa')&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.9')){localStorage.setItem('wa','1');tg.requestWriteAccess()}}catch(e){}
 }
 function report(r){
   if(!r.total)return tg.showAlert('Некому отправлять: нет подходящих людей в списке');
@@ -387,6 +390,22 @@ async function mv(id,dir){
   try{await api('/api/act',{action:'reorder',ids:arr.map(x=>x.id)})}catch(e){tg.showAlert('Не удалось сохранить порядок');load()}
 }
 
+// ===== Просмотр приложения глазами других ролей (только редактор) =====
+const PVL={reader:'Бариста',trainee:'Стажёр',partner:'Партнёр'};
+function pvBar(){
+  let b=document.getElementById('pvbar');
+  if(!D.preview){if(b)b.remove();return}
+  if(!b){b=document.createElement('div');b.id='pvbar';document.body.appendChild(b)}
+  b.innerHTML=`<span>👁 Просмотр: ${PVL[D.preview.as]}${D.preview.as==='trainee'?' · этап '+D.preview.stage:''}</span><button onclick="exitPV()">Выйти</button>`;
+}
+function startPV(as){PV={as,stage:as==='trainee'?+document.getElementById('pst').value:undefined};view={t:'list'};load()}
+function exitPV(){PV=null;view={t:'list'};load()}
+function preview(){
+  $.innerHTML=H+'<h2>Посмотреть как</h2><p class=hint>Приложение откроется так, как его видит выбранный человек. Ничего не сохраняется: отметки «прочитано» и результаты тестов не записываются. Выйти можно кнопкой внизу экрана.</p>'+
+    '<div class=row><button class=main onclick="startPV(\'reader\')">Как бариста</button><button class=main onclick="startPV(\'partner\')">Как партнёр</button></div>'+
+    '<h3>Как стажёр</h3><select id=pst>'+[1,2,3,4,5,6].map(n=>`<option value=${n}>Этап ${n}</option>`).join('')+'</select><div class=row><button class=main onclick="startPV(\'trainee\')">Открыть как стажёр</button></div>';
+}
+
 // ===== Стажёры: этапы и тесты =====
 function tcheck(){
   const t=D.trainee;if(!t)return;
@@ -402,16 +421,16 @@ function banner(){
 }
 async function quiz(){
   $.innerHTML=H+'Загрузка…';
-  QZ=await act({action:'quizGet'});QZ.ans=[];
+  QZ=await act({action:'quizGet',preview_stage:D.preview?D.preview.stage:undefined});QZ.ans=[];
   $.innerHTML=H+`<h2>${esc(QZ.title||'Тест')}</h2><p class=hint>Нужно правильных ответов: ${QZ.pass_percent}%.</p>`+
     QZ.questions.map((x,i)=>`<div class=card style="cursor:default"><b>${i+1}. ${esc(x.q)}</b>`+x.options.map((o,j)=>`<label class=opt><input type=radio name=q${i} onchange="QZ.ans[${i}]=${j}">${esc(o)}</label>`).join('')+'</div>').join('')+
     '<div class=row><button class=main onclick="sendQuiz()">Отправить</button></div>';
 }
 async function sendQuiz(){
   if(QZ.questions.some((_,i)=>QZ.ans[i]===undefined))return tg.showAlert('Ответь на все вопросы');
-  const r=await act({action:'quizSubmit',answers:QZ.questions.map((_,i)=>QZ.ans[i])});
-  $.innerHTML=H+`<h2>${r.passed?'Тест сдан 🎉':'Пока не сдан'}</h2><p>Результат: ${r.score}%</p>`+
-    (r.passed?'<p>Открылся следующий этап.</p>':`<p>Вопросы с ошибками:</p>${(r.wrongQ||[]).map(q=>'<div class=card style="cursor:default">'+esc(q)+'</div>').join('')}<p>Перечитай статьи этапа и попробуй ещё раз.</p>`)+
+  const r=await act({action:'quizSubmit',preview_stage:D.preview?D.preview.stage:undefined,answers:QZ.questions.map((_,i)=>QZ.ans[i])});
+  $.innerHTML=H+`<h2>${r.passed?'Тест сдан 🎉':'Пока не сдан'}</h2><p>Результат: ${r.score}%</p>${r.preview?'<p class=hint>Режим просмотра: результат не сохранён.</p>':''}`+
+    (r.passed?(r.preview?'<p>Тест пройден.</p>':'<p>Открылся следующий этап.</p>'):`<p>Вопросы с ошибками:</p>${(r.wrongQ||[]).map(q=>'<div class=card style="cursor:default">'+esc(q)+'</div>').join('')}<p>Перечитай статьи этапа и попробуй ещё раз.</p>`)+
     '<div class=row><button class=main onclick="view={t:\'list\'};load()">К статьям</button></div>';
 }
 async function quizzes(){
