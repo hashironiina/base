@@ -97,13 +97,13 @@ function render(){
   const m=D.me.role==='admin';
   pvBar();
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,order,myorders,orders,osum,oconfig,suggest,sugs})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,suggest,sugs})[view.t]();
 }
 
 function list(m){
   $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
     (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button></div>`:'')+
-    ordersRow()+sugRow()+'<div id=res></div>';
+    sugRow()+'<div id=res></div>';
   results();
 }
 const tag=a=>D.me.role==='admin'?`<span class=tag>${a.draft?'черновик · ':''}${a.access==='partners'?'партнёры':a.access==='all'?'все':'бариста'}${a.stage>0?' · этап '+a.stage:''}</span>`:'';
@@ -432,72 +432,6 @@ async function sugs(){
   $.innerHTML=H+'<h2>Предложения</h2>'+(r.items.map(s=>`<div class=card style="cursor:default"><b>${SKIND[s.kind]}</b> · <i>${SST[s.status]}</i><br><small class=hint>от ${esc(r.names[s.created_by]||'?')} · ${dt(s.created_at)}${s.art?' · статья «'+esc(s.art)+'»':''}</small><br>${esc(s.text).replace(/\n/g,'<br>')}<div class=row><button onclick="setSug(${s.id},'seen')">Рассмотрено</button><button class=main onclick="setSug(${s.id},'done')">Сделано</button></div></div>`).join('')||'<p class=hint>Предложений пока нет.</p>');
 }
 async function setSug(id,status){await act({action:'sugStatus',id,status});sugs()}
-
-// ===== Заявки на пончики =====
-let OF=null;
-const OST={new:'новая',accepted:'принята',shipped:'отгружена',cancelled:'отменена'};
-const fd=s=>String(s).split('-').reverse().join('.');
-const tomorrow=()=>{const d=new Date();d.setDate(d.getDate()+1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-function ordersRow(){
-  const o=D.orders;if(!o)return'';
-  return '<div class=row><button class=acc onclick="OF=null;go(\'order\')">🍩 Заявка на пончики</button><button onclick="go(\'myorders\')">Мои заявки</button>'+(o.manage?'<button onclick="go(\'orders\')">Все заявки</button>':'')+'</div>';
-}
-function order(){
-  const o=D.orders;
-  if(!o.items.length){$.innerHTML=H+'<h2>Заявка на пончики</h2><p>Список позиций пока не настроен. '+(D.me.role==='admin'?'Настрой его: «Все заявки», затем «Настройки».':'Напиши шеф-баристе.')+'</p>';return}
-  if(!OF)OF={point:o.points[0]||'',date:tomorrow(),qty:{},comment:''};
-  $.innerHTML=H+'<h2>Заявка на пончики</h2>'+
-    (o.points.length?`<select onchange="OF.point=this.value">${o.points.map(p=>`<option ${p===OF.point?'selected':''}>${esc(p)}</option>`).join('')}</select>`:`<input placeholder="Точка" value="${esc(OF.point)}" oninput="OF.point=this.value">`)+
-    `<p class=hint>На какую дату:</p><input type=date value="${OF.date}" onchange="OF.date=this.value">`+
-    o.items.map((n,i)=>`<div class=row><span style="flex:1">${esc(n)}</span><button onclick="qty(${i},-1)">−</button><b id=q${i} style="min-width:28px;text-align:center">${OF.qty[n]||0}</b><button onclick="qty(${i},1)">+</button></div>`).join('')+
-    `<textarea rows=3 placeholder="Комментарий (необязательно)" oninput="OF.comment=this.value">${esc(OF.comment)}</textarea><div class=row><button class=main id=osend onclick="sendOrder()">Отправить заявку</button></div>`;
-}
-function qty(i,d){const n=D.orders.items[i];OF.qty[n]=Math.max(0,(OF.qty[n]||0)+d);document.getElementById('q'+i).textContent=OF.qty[n]}
-async function sendOrder(){
-  if(D.preview)return tg.showAlert('Режим просмотра: заявка не отправляется');
-  const items=D.orders.items.map(n=>({name:n,qty:OF.qty[n]||0})).filter(x=>x.qty>0);
-  if(!OF.point.trim())return tg.showAlert('Выбери точку');
-  if(!items.length)return tg.showAlert('Добавь хотя бы одну позицию');
-  if(!OF.date)return tg.showAlert('Укажи дату');
-  const b=document.getElementById('osend');b.disabled=true;
-  try{
-    const r=await act({action:'orderCreate',point:OF.point,date:OF.date,items,comment:OF.comment});
-    OF=null;
-    tg.showAlert(r.sent?'Заявка №'+r.id+' отправлена':'Заявка №'+r.id+' сохранена, но получатель пока не получил сообщение (ему нужно нажать Start у бота)');
-    go('myorders');
-  }catch(e){b.disabled=false}
-}
-async function myorders(){
-  $.innerHTML=H+'Загрузка…';
-  const r=await act({action:'orderMine'});
-  $.innerHTML=H+'<h2>Мои заявки</h2>'+(r.orders.map(o=>`<div class=card style="cursor:default"><b>№${o.id} · ${esc(o.point)}</b> · на ${fd(o.need_date)} · <i>${OST[o.status]}</i><br><small class=hint>${o.items.map(x=>esc(x.name)+': '+x.qty).join(', ')}</small>${o.status==='new'?`<div class=row><button class=danger onclick="cancelOrder(${o.id})">Отменить</button></div>`:''}</div>`).join('')||'<p class=hint>Заявок пока нет.</p>');
-}
-function cancelOrder(id){tg.showConfirm('Отменить заявку?',async ok=>{if(!ok)return;await act({action:'orderCancel',id});myorders()})}
-async function orders(){
-  $.innerHTML=H+'Загрузка…';
-  const r=await act({action:'orderList'});
-  $.innerHTML=H+'<h2>Заявки</h2><div class=row>'+(D.me.role==='admin'?'<button onclick="go(\'oconfig\')">Настройки</button>':'')+'<button onclick="go(\'osum\')">Сводка на день</button></div>'+
-    (r.orders.map(o=>`<div class=card style="cursor:default"><b>№${o.id} · ${esc(o.point)}</b> · на ${fd(o.need_date)} · <i>${OST[o.status]}</i><br><small class=hint>от ${esc(r.names[o.created_by]||'?')}</small><br>${o.items.map(x=>esc(x.name)+': '+x.qty).join('<br>')}${o.comment?'<br><small class=hint>'+esc(o.comment)+'</small>':''}<div class=row><button onclick="setOrder(${o.id},'accepted')">Принять</button><button onclick="setOrder(${o.id},'shipped')">Отгружено</button><button class=danger onclick="setOrder(${o.id},'cancelled')">Отменить</button></div></div>`).join('')||'<p class=hint>Заявок пока нет.</p>');
-}
-async function setOrder(id,status){await act({action:'orderStatus',id,status});orders()}
-function osum(){
-  $.innerHTML=H+'<h2>Сводка на день</h2><input type=date id=sd value="'+tomorrow()+'"><div class=row><button class=main onclick="showSum()">Показать</button></div><div id=sr></div>';
-  showSum();
-}
-async function showSum(){
-  const r=await act({action:'orderSummary',date:document.getElementById('sd').value});
-  document.getElementById('sr').innerHTML=r.count?`<p class=hint>Заявок: ${r.count}</p><h3>Всего</h3>`+r.total.map(([n,q])=>`<div>• ${esc(n)}: <b>${q}</b></div>`).join('')+'<h3>По точкам</h3>'+Object.entries(r.per).map(([p,it])=>`<div class=card style="cursor:default"><b>${esc(p)}</b><br>${Object.entries(it).map(([n,q])=>esc(n)+': '+q).join('<br>')}</div>`).join(''):'<p class=hint>На эту дату заявок нет.</p>';
-}
-async function oconfig(){
-  $.innerHTML=H+'Загрузка…';
-  const [c,u]=await Promise.all([act({action:'orderConfigGet'}),act({action:'listUsers'})]);
-  $.innerHTML=H+'<h2>Настройки заявок</h2><p class=hint>Позиции для заказа, по одной в строке:</p><textarea id=cfi rows=8>'+esc(c.config.items.join('\n'))+'</textarea><p class=hint>Точки, по одной в строке:</p><textarea id=cfp rows=4>'+esc(c.config.points.join('\n'))+'</textarea><p class=hint>Кто получает заявки (если не выбрано, получают все редакторы):</p><select id=cfr><option value="">Все редакторы</option>'+u.users.map(x=>`<option value=${x.telegram_id} ${x.telegram_id===c.config.recipient?'selected':''}>${esc(x.name)}</option>`).join('')+'</select><div class=row><button class=main onclick="saveCfg()">Сохранить</button></div>';
-}
-async function saveCfg(){
-  await act({action:'orderConfigSave',items:document.getElementById('cfi').value.split('\n'),points:document.getElementById('cfp').value.split('\n'),recipient:document.getElementById('cfr').value||null});
-  tg.showAlert('Сохранено');
-  await load();
-}
 
 // ===== Стажёр: подтверждение «прочитано» кнопкой =====
 function readBlock(a){
