@@ -23,6 +23,8 @@ module.exports = async (req, res) => {
   let aq = db.from('articles').select('*').in('access', levels).order('sort_order').order('id');
   // Стажёр видит только статьи уже открытых этапов (этап статьи от 1 до его текущего)
   if (me.role === 'trainee') aq = aq.gte('stage', 1).lte('stage', me.stage);
+  // Черновики видит только редактор (в режиме просмотра их тоже не видно)
+  if (me.role !== 'admin') aq = aq.eq('draft', false);
 
   const [s, a, r] = await Promise.all([
     db.from('sections').select('*').order('sort_order'),
@@ -41,7 +43,7 @@ module.exports = async (req, res) => {
   if (me.role === 'trainee') {
     const readSet = new Set((r.data || []).map((x) => x.article_id));
     const cur = articles.filter((x) => x.stage === me.stage);
-    const top = await db.from('articles').select('stage').in('access', ['staff', 'all'])
+    const top = await db.from('articles').select('stage').in('access', ['staff', 'all']).eq('draft', false)
       .order('stage', { ascending: false }).limit(1);
     const max = (top.data && top.data[0] && top.data[0].stage) || 0;
     const qz = await db.from('quizzes').select('questions').eq('stage', me.stage).maybeSingle();
@@ -71,10 +73,24 @@ module.exports = async (req, res) => {
     furls[f.path] = (data && data.signedUrl) || '';
   }));
 
+  // Заявки на пончики: позиции и точки для формы (только бариста и редактор)
+  let orders = null;
+  if (['admin', 'reader'].includes(me.role)) {
+    const cr = await db.from('settings').select('value').eq('key', 'orders').maybeSingle();
+    const v = (cr.data && cr.data.value) || {};
+    orders = {
+      items: Array.isArray(v.items) ? v.items : [],
+      points: Array.isArray(v.points) ? v.points : [],
+      // Управлять заявками может редактор или назначенный получатель (в режиме просмотра — нет)
+      manage: !as && (real.role === 'admin' || real.telegram_id === Number(v.recipient)),
+    };
+  }
+
   res.json({
     me: { id: me.telegram_id, name: me.name, role: me.role },
     preview: as ? { as, stage: me.stage } : null,
     trainee,
+    orders,
     sections,
     articles: articles.map((x) => ({
       ...x,
