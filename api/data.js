@@ -73,24 +73,10 @@ module.exports = async (req, res) => {
     furls[f.path] = (data && data.signedUrl) || '';
   }));
 
-  // Заявки на пончики: позиции и точки для формы (только бариста и редактор)
-  let orders = null;
-  if (['admin', 'reader'].includes(me.role)) {
-    const cr = await db.from('settings').select('value').eq('key', 'orders').maybeSingle();
-    const v = (cr.data && cr.data.value) || {};
-    orders = {
-      items: Array.isArray(v.items) ? v.items : [],
-      points: Array.isArray(v.points) ? v.points : [],
-      // Управлять заявками может редактор или назначенный получатель (в режиме просмотра — нет)
-      manage: !as && (real.role === 'admin' || real.telegram_id === Number(v.recipient)),
-    };
-  }
-
   res.json({
     me: { id: me.telegram_id, name: me.name, role: me.role },
     preview: as ? { as, stage: me.stage } : null,
     trainee,
-    orders,
     sections,
     articles: articles.map((x) => ({
       ...x,
