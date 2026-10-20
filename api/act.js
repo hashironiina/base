@@ -25,9 +25,27 @@ async function broadcast(users, text, appUrl) {
   return { sent, failed };
 }
 
+// ---- Заявки на пончики ----
+async function orderCfg() {
+  const r = chk(await db.from('settings').select('value').eq('key', 'orders')).data[0];
+  const v = (r && r.value) || {};
+  return {
+    items: Array.isArray(v.items) ? v.items : [],
+    points: Array.isArray(v.points) ? v.points : [],
+    recipient: Number(v.recipient) || null,
+  };
+}
+// Кому слать заявки: назначенному получателю, а если его нет — всем редакторам
+async function orderTo(cfg) {
+  const all = chk(await db.from('users').select('telegram_id,name,role')).data;
+  const one = cfg.recipient ? all.filter((u) => u.telegram_id === cfg.recipient) : [];
+  return one.length ? one : all.filter((u) => u.role === 'admin');
+}
+const fdate = (s) => String(s).split('-').reverse().join('.');
+
 // Состояние текущего этапа стажёра: сколько статей, все ли открыты, есть ли тест
 async function stageState(me) {
-  const cur = chk(await db.from('articles').select('id').in('access', ['staff', 'all']).eq('stage', me.stage)).data;
+  const cur = chk(await db.from('articles').select('id').in('access', ['staff', 'all']).eq('draft', false).eq('stage', me.stage)).data;
   let readCount = 0;
   if (cur.length) {
     readCount = chk(await db.from('reads').select('article_id')
@@ -46,6 +64,7 @@ module.exports = async (req, res) => {
   const me = await auth(req);
   if (!me) return res.status(403).json({ error: 'no_access' });
   const { action, ...d } = req.body || {};
+  const appUrl = 'https://' + (req.headers['x-forwarded-host'] || req.headers.host);
 
   try {
     // Отметка «прочитано» доступна всем из списка
@@ -98,6 +117,84 @@ module.exports = async (req, res) => {
       return res.json({ ok: 1, score, passed, wrong, preview: pv, wrongQ: detail.filter((m) => !m.ok).map((m) => m.q) });
     }
 
+    // Предложения по улучшению: отправлять могут все
+    if (action === 'sugCreate') {
+      const kinds = { idea: 'Идея', error: 'Ошибка в статье', other: 'Другое' };
+      const text = String(d.text || '').trim().slice(0, 2000);
+      if (text.length < 5) throw new Error('Опиши предложение подробнее');
+      const kind = kinds[d.kind] ? d.kind : 'other';
+      const since = new Date(Date.now() - 864e5).toISOString();
+      const cnt = chk(await db.from('suggestions').select('id').eq('created_by', me.telegram_id).gte('created_at', since)).data.length;
+      if (cnt >= 10) throw new Error('Сегодня уже отправлено много предложений, попробуй завтра');
+      const artId = Number(d.article_id) || null;
+      const row = chk(await db.from('suggestions').insert({ created_by: me.telegram_id, kind, text, article_id: artId }).select('id')).data[0];
+      let art = null;
+      if (artId) { const a = chk(await db.from('articles').select('title').eq('id', artId)).data[0]; art = a && a.title; }
+      const admins = chk(await db.from('users').select('telegram_id,name').eq('role', 'admin')).data;
+      await broadcast(admins, '💡 Предложение №' + row.id + ' (' + kinds[kind] + ')\nот: ' + me.name + (art ? '\nСтатья: «' + art + '»' : '') + '\n\n' + text, appUrl);
+      return res.json({ ok: 1 });
+    }
+    // Заявки на пончики: создавать и отменять свои могут бариста и редактор
+    if (['orderCreate', 'orderMine', 'orderCancel'].includes(action)) {
+      if (!['admin', 'reader'].includes(me.role)) return res.status(403).json({ error: 'admin_only' });
+      const cfg = await orderCfg();
+      if (action === 'orderMine') {
+        return res.json({ ok: 1, orders: chk(await db.from('orders').select('*').eq('created_by', me.telegram_id).order('created_at', { ascending: false }).limit(20)).data });
+      }
+      if (action === 'orderCancel') {
+        const o = chk(await db.from('orders').select('id,status,point').eq('id', d.id).eq('created_by', me.telegram_id)).data[0];
+        if (!o) throw new Error('Заявка не найдена');
+        if (o.status !== 'new') throw new Error('Заявку уже приняли, отменить нельзя');
+        chk(await db.from('orders').update({ status: 'cancelled' }).eq('id', o.id));
+        await broadcast(await orderTo(cfg), '🍩 Заявка №' + o.id + ' отменена (' + o.point + ')', appUrl);
+        return res.json({ ok: 1 });
+      }
+      const items = (Array.isArray(d.items) ? d.items : [])
+        .map((x) => ({ name: String(x.name || '').slice(0, 80), qty: Math.max(0, Math.min(999, Number(x.qty) || 0)) }))
+        .filter((x) => x.name && x.qty > 0).slice(0, 60);
+      if (!items.length) throw new Error('Добавь хотя бы одну позицию');
+      const point = String(d.point || '').trim().slice(0, 80);
+      if (!point) throw new Error('Выбери точку');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || '')) throw new Error('Укажи дату');
+      const comment = String(d.comment || '').trim().slice(0, 500);
+      const ins = chk(await db.from('orders').insert({ created_by: me.telegram_id, point, need_date: d.date, items, comment }).select('id'));
+      const id = ins.data[0].id;
+      const text = '🍩 Новая заявка №' + id + '\nТочка: ' + point + '\nНа дату: ' + fdate(d.date) + '\nОт: ' + me.name + '\n' +
+        items.map((x) => '• ' + x.name + ': ' + x.qty).join('\n') + (comment ? '\nКомментарий: ' + comment : '');
+      const r = await broadcast(await orderTo(cfg), text, appUrl);
+      return res.json({ ok: 1, id, sent: r.sent });
+    }
+    // Управление заявками: редактор или назначенный получатель
+    if (['orderList', 'orderStatus', 'orderSummary'].includes(action)) {
+      const cfg = await orderCfg();
+      if (me.role !== 'admin' && me.telegram_id !== cfg.recipient) return res.status(403).json({ error: 'admin_only' });
+      if (action === 'orderList') {
+        const orders = chk(await db.from('orders').select('*').order('need_date', { ascending: false }).order('created_at', { ascending: false }).limit(100)).data;
+        const names = {};
+        chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { names[u.telegram_id] = u.name; });
+        return res.json({ ok: 1, orders, names });
+      }
+      if (action === 'orderStatus') {
+        if (!['new', 'accepted', 'shipped', 'cancelled'].includes(d.status)) throw new Error('Неверный статус');
+        const o = chk(await db.from('orders').update({ status: d.status }).eq('id', d.id).select('id,created_by')).data[0];
+        if (o && o.created_by !== me.telegram_id) {
+          const lab = { new: 'снова новая', accepted: 'принята', shipped: 'отгружена', cancelled: 'отменена' }[d.status];
+          await tgSend(o.created_by, '🍩 Заявка №' + o.id + ': ' + lab, appUrl);
+        }
+        return res.json({ ok: 1 });
+      }
+      // Сводка на дату: сколько чего заказали всего и по точкам
+      const rows = chk(await db.from('orders').select('point,items').eq('need_date', d.date).neq('status', 'cancelled')).data;
+      const total = {};
+      const per = {};
+      rows.forEach((o) => (o.items || []).forEach((i) => {
+        total[i.name] = (total[i.name] || 0) + i.qty;
+        if (!per[o.point]) per[o.point] = {};
+        per[o.point][i.name] = (per[o.point][i.name] || 0) + i.qty;
+      }));
+      return res.json({ ok: 1, count: rows.length, total: Object.entries(total).sort((a, b) => b[1] - a[1]), per });
+    }
+
     // Всё остальное только для редакторов
     if (me.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
 
@@ -112,6 +209,7 @@ module.exports = async (req, res) => {
         body_html: typeof d.body_html === 'string' ? d.body_html.slice(0, 200000) : null,
         access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
         stage: Math.max(0, Math.min(9, Number(d.stage) || 0)),
+        draft: !!d.draft,
         files: (Array.isArray(d.files) ? d.files : [])
           .filter((f) => f && typeof f.path === 'string' && f.path.startsWith('files/'))
           .slice(0, 10)
@@ -126,6 +224,31 @@ module.exports = async (req, res) => {
       }
       const r = chk(await save('articles', row).select('id'));
       out.id = d.id || (r.data[0] && r.data[0].id);
+    }
+    else if (action === 'sugList') {
+      const items = chk(await db.from('suggestions').select('*').order('created_at', { ascending: false }).limit(100)).data;
+      const names = {};
+      chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { names[u.telegram_id] = u.name; });
+      const ids = [...new Set(items.map((x) => x.article_id).filter(Boolean))];
+      const titles = {};
+      if (ids.length) chk(await db.from('articles').select('id,title').in('id', ids)).data.forEach((a) => { titles[a.id] = a.title; });
+      out.items = items.map((x) => ({ ...x, art: x.article_id ? titles[x.article_id] || null : null }));
+      out.names = names;
+    }
+    else if (action === 'sugStatus') {
+      if (!['new', 'seen', 'done'].includes(d.status)) throw new Error('Неверный статус');
+      const sg = chk(await db.from('suggestions').update({ status: d.status }).eq('id', d.id).select('id,created_by')).data[0];
+      if (sg && d.status !== 'new' && sg.created_by !== me.telegram_id) {
+        await tgSend(sg.created_by, '💡 Твоё предложение №' + sg.id + ': ' + (d.status === 'done' ? 'сделано, спасибо!' : 'рассмотрено'), appUrl);
+      }
+    }
+    else if (action === 'orderConfigGet') out.config = await orderCfg();
+    else if (action === 'orderConfigSave') {
+      const lines = (a) => (Array.isArray(a) ? a : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, 100);
+      chk(await db.from('settings').upsert({
+        key: 'orders',
+        value: { items: lines(d.items), points: lines(d.points), recipient: Number(d.recipient) || null },
+      }, { onConflict: 'key' }));
     }
     else if (action === 'fileUrl') {
       // Адрес для прямой загрузки файла в хранилище (в обход лимита размера Vercel)
@@ -231,8 +354,9 @@ module.exports = async (req, res) => {
       const all = chk(await db.from('users').select('telegram_id,name,role,stage').neq('role', 'admin')).data;
       let to, text;
       if (d.article_id) {
-        const a = chk(await db.from('articles').select('title,access,stage,section_id').eq('id', d.article_id)).data[0];
+        const a = chk(await db.from('articles').select('title,access,stage,section_id,draft').eq('id', d.article_id)).data[0];
         if (!a) throw new Error('Статья не найдена');
+        if (a.draft) throw new Error('Статья в черновиках: уведомление не отправлено');
         const sec = chk(await db.from('sections').select('title').eq('id', a.section_id)).data[0];
         const roles = a.access === 'partners' ? ['partner'] : a.access === 'all' ? ['reader', 'trainee', 'partner'] : ['reader', 'trainee'];
         // Стажёр получает уведомление, только если статья уже открыта на его этапе
@@ -306,7 +430,7 @@ module.exports = async (req, res) => {
       chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { nmap[u.telegram_id] = u.name; });
       out.names = nmap;
       out.trainees = chk(await db.from('users').select('telegram_id,name,stage').eq('role', 'trainee').order('name')).data;
-      out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).order('section_id').order('sort_order').order('id')).data;
+      out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).eq('draft', false).order('section_id').order('sort_order').order('id')).data;
       let attempts = [];
       for (let i = 0; ; i += 1000) {
         const x = chk(await db.from('quiz_attempts').select('id,telegram_id,stage,score,passed,created_at,detail')
