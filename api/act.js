@@ -1,6 +1,139 @@
 const { db, auth } = require('./_lib');
 const chk = (r) => { if (r.error) throw r.error; return r; };
 
+// ---- Выгрузка результатов тестов: Word (.docx) и Excel (.csv) без внешних библиотек ----
+const CRC_T = (() => {
+  const t = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) crc = CRC_T[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+// Простейший zip (без сжатия): docx — это zip с XML-файлами
+function zipStore(files) {
+  const locals = [];
+  const centrals = [];
+  let off = 0;
+  for (const f of files) {
+    const name = Buffer.from(f.name, 'utf8');
+    const data = f.data;
+    const crc = crc32(data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0x0800, 6);
+    lh.writeUInt16LE(0, 8); lh.writeUInt16LE(0, 10); lh.writeUInt16LE(0x21, 12);
+    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(data.length, 22);
+    lh.writeUInt16LE(name.length, 26); lh.writeUInt16LE(0, 28);
+    locals.push(lh, name, data);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(0x0800, 8);
+    ch.writeUInt16LE(0, 10); ch.writeUInt16LE(0, 12); ch.writeUInt16LE(0x21, 14);
+    ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(data.length, 24);
+    ch.writeUInt16LE(name.length, 28); ch.writeUInt32LE(off, 42);
+    centrals.push(ch, name);
+    off += 30 + name.length + data.length;
+  }
+  const cd = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
+  return Buffer.concat([...locals, cd, end]);
+}
+
+const wx = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const wrun = (t, o = {}) => '<w:r><w:rPr>' + (o.b ? '<w:b/>' : '') + (o.i ? '<w:i/>' : '') + (o.sz ? '<w:sz w:val="' + o.sz + '"/>' : '') +
+  '</w:rPr><w:t xml:space="preserve">' + wx(t) + '</w:t></w:r>';
+const wpara = (t, o = {}) => '<w:p><w:pPr><w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 120 : o.after) + '"/></w:pPr>' + wrun(t, o) + '</w:p>';
+const wcell = (t, w, hdr) => '<w:tc><w:tcPr><w:tcW w:w="' + w + '" w:type="dxa"/>' + (hdr ? '<w:shd w:val="clear" w:color="auto" w:fill="E9E2D8"/>' : '') + '</w:tcPr>' +
+  String(t == null ? '' : t).split('\n').map((l) => '<w:p>' + wrun(l, { b: hdr }) + '</w:p>').join('') + '</w:tc>';
+const wtable = (rows, widths) => '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>' +
+  ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map((s) => '<w:' + s + ' w:val="single" w:sz="4" w:space="0" w:color="999999"/>').join('') +
+  '</w:tblBorders></w:tblPr><w:tblGrid>' + widths.map((w) => '<w:gridCol w:w="' + w + '"/>').join('') + '</w:tblGrid>' +
+  rows.map((r, i) => '<w:tr>' + r.map((c, j) => wcell(c, widths[j], i === 0)).join('') + '</w:tr>').join('') + '</w:tbl><w:p/>';
+
+function buildExport({ att, names, format, tz }) {
+  const zone = typeof tz === 'string' && tz.length < 60 ? tz : 'Europe/Moscow';
+  const fmt = (v) => {
+    try { return new Date(v).toLocaleString('ru-RU', { timeZone: zone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return String(v); }
+  };
+  const nm = (id) => names[id] || ('ID ' + id);
+  const by = {};
+  att.forEach((a) => { (by[a.telegram_id] = by[a.telegram_id] || []).push(a); });
+  const ids = Object.keys(by).sort((a, b) => nm(a).localeCompare(nm(b), 'ru'));
+  const stamp = new Date().toISOString().slice(0, 10);
+  const wrongOf = (a) => (a.detail || []).filter((m) => !m.ok);
+
+  if (format === 'csv') {
+    const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const rows = [['Стажёр', 'Этап', 'Дата', 'Результат, %', 'Итог', 'Ошибки']];
+    ids.forEach((id) => by[id].forEach((a) => rows.push([
+      nm(id), a.stage, fmt(a.created_at), a.score, a.passed ? 'сдан' : 'не сдан',
+      a.detail ? wrongOf(a).map((m) => m.q + ' — ответил: ' + m.chosen + '; правильно: ' + m.correct).join('\n') : 'детали не сохранены',
+    ])));
+    return {
+      buffer: Buffer.from('\ufeff' + rows.map((r) => r.map(q).join(';')).join('\r\n'), 'utf8'),
+      filename: 'test-results-' + stamp + '.csv',
+      mime: 'text/csv',
+    };
+  }
+
+  let body = wpara('Результаты тестов стажёров', { b: 1, sz: 36, after: 80 }) + wpara('Выгрузка от ' + fmt(new Date()), { i: 1, after: 240 });
+  body += wpara('Сводка', { b: 1, sz: 28, before: 120 });
+  const sum = [['Стажёр', 'Этап', 'Попыток', 'Лучший результат', 'Итог']];
+  ids.forEach((id) => {
+    [...new Set(by[id].map((a) => a.stage))].sort((a, b) => a - b).forEach((g) => {
+      const a = by[id].filter((x) => x.stage === g);
+      const okA = a.find((x) => x.passed);
+      sum.push([nm(id), String(g), String(a.length), Math.max(...a.map((x) => x.score)) + '%', okA ? 'сдан ' + fmt(okA.created_at) : 'не сдан']);
+    });
+  });
+  body += wtable(sum, [2400, 800, 1100, 1700, 3000]);
+  ids.forEach((id) => {
+    body += wpara(nm(id), { b: 1, sz: 28, before: 240 });
+    by[id].forEach((a) => {
+      body += wpara('Этап ' + a.stage + ' — ' + fmt(a.created_at) + ' — ' + a.score + '% (' + (a.passed ? 'сдан' : 'не сдан') + ')', { b: 1, before: 120, after: 80 });
+      if (!a.detail) body += wpara('Детали этой попытки не сохранились.', { i: 1 });
+      else if (!wrongOf(a).length) body += wpara('Ошибок нет.');
+      else body += wtable([['Вопрос', 'Ответ стажёра', 'Правильный ответ']].concat(wrongOf(a).map((m) => [m.q, m.chosen, m.correct])), [4200, 2400, 2400]);
+    });
+  });
+  const doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body +
+    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr></w:body></w:document>';
+  const types = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>';
+  const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
+  return {
+    buffer: zipStore([
+      { name: '[Content_Types].xml', data: Buffer.from(types, 'utf8') },
+      { name: '_rels/.rels', data: Buffer.from(rels, 'utf8') },
+      { name: 'word/document.xml', data: Buffer.from(doc, 'utf8') },
+    ]),
+    filename: 'test-results-' + stamp + '.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+}
+
+// Отправка файла в личный чат с ботом (надёжнее, чем ссылка из приложения)
+async function tgSendDoc(chatId, filename, buffer, mime, caption) {
+  try {
+    const fd = new FormData();
+    fd.append('chat_id', String(chatId));
+    if (caption) fd.append('caption', caption);
+    fd.append('document', new Blob([buffer], { type: mime }), filename);
+    const r = await fetch('https://api.telegram.org/bot' + process.env.BOT_TOKEN + '/sendDocument', { method: 'POST', body: fd });
+    const j = await r.json();
+    return !!j.ok;
+  } catch (e) { return false; }
+}
+
+
+
 // Отправка сообщения человеку от имени бота (кнопка открывает приложение)
 async function tgSend(chatId, text, appUrl) {
   const body = { chat_id: chatId, text };
@@ -182,12 +315,7 @@ module.exports = async (req, res) => {
       chk(await db.storage.from('images').upload(path, Buffer.from(d.data, 'base64'), { contentType: types[ext], upsert: true }));
     }
     else if (action === 'exportResults') {
-      // Выгрузка результатов тестов: Word (.doc) с разбором ошибок или Excel (.csv)
-      const tz = typeof d.tz === 'string' && d.tz.length < 60 ? d.tz : 'Europe/Moscow';
-      const fmt = (v) => {
-        try { return new Date(v).toLocaleString('ru-RU', { timeZone: tz, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
-        catch (e) { return String(v); }
-      };
+      // Выгрузка результатов тестов: Word (.docx) с разбором ошибок или Excel (.csv)
       let att = [];
       for (let i = 0; ; i += 1000) {
         let q = db.from('quiz_attempts').select('telegram_id,stage,score,passed,created_at,detail')
@@ -197,68 +325,28 @@ module.exports = async (req, res) => {
         att = att.concat(x);
         if (x.length < 1000) break;
       }
-      if (!att.length) out.url = null;
+      if (!att.length) out.empty = true;
       else {
         const names = {};
         chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { names[u.telegram_id] = u.name; });
-        const nm = (id) => names[id] || ('ID ' + id);
-        const by = {};
-        att.forEach((a) => { (by[a.telegram_id] = by[a.telegram_id] || []).push(a); });
-        const ids = Object.keys(by).sort((a, b) => nm(a).localeCompare(nm(b), 'ru'));
-        const stamp = new Date().toISOString().slice(0, 10);
-        let body, ext, ctype;
-        if (d.format === 'csv') {
-          const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-          const rows = [['Стажёр', 'Этап', 'Дата', 'Результат, %', 'Итог', 'Ошибки']];
-          ids.forEach((id) => by[id].forEach((a) => rows.push([
-            nm(id), a.stage, fmt(a.created_at), a.score, a.passed ? 'сдан' : 'не сдан',
-            a.detail ? a.detail.filter((m) => !m.ok).map((m) => m.q + ' — ответил: ' + m.chosen + '; правильно: ' + m.correct).join('\n') : 'детали не сохранены',
-          ])));
-          body = '\ufeff' + rows.map((r) => r.map(q).join(';')).join('\r\n');
-          ext = 'csv'; ctype = 'text/csv; charset=utf-8';
-        } else {
-          const h = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          let html = '<h1>Результаты тестов стажёров</h1><p>Выгрузка от ' + h(fmt(new Date())) + '</p>';
-          html += '<h2>Сводка</h2><table><tr><th>Стажёр</th><th>Этап</th><th>Попыток</th><th>Лучший результат</th><th>Итог</th></tr>';
-          ids.forEach((id) => {
-            [...new Set(by[id].map((a) => a.stage))].sort((a, b) => a - b).forEach((g) => {
-              const a = by[id].filter((x) => x.stage === g);
-              const best = Math.max(...a.map((x) => x.score));
-              const okA = a.find((x) => x.passed);
-              html += '<tr><td>' + h(nm(id)) + '</td><td>' + g + '</td><td>' + a.length + '</td><td>' + best + '%</td><td>' + (okA ? 'сдан ' + h(fmt(okA.created_at)) : 'не сдан') + '</td></tr>';
-            });
-          });
-          html += '</table>';
-          ids.forEach((id) => {
-            html += '<h2>' + h(nm(id)) + '</h2>';
-            by[id].forEach((a) => {
-              html += '<h3>Этап ' + a.stage + ' — ' + h(fmt(a.created_at)) + ' — ' + a.score + '% (' + (a.passed ? 'сдан' : 'не сдан') + ')</h3>';
-              if (!a.detail) html += '<p><i>Детали этой попытки не сохранились.</i></p>';
-              else {
-                const w = a.detail.filter((m) => !m.ok);
-                if (!w.length) html += '<p>Ошибок нет.</p>';
-                else {
-                  html += '<table><tr><th>Вопрос</th><th>Ответ стажёра</th><th>Правильный ответ</th></tr>';
-                  w.forEach((m) => { html += '<tr><td>' + h(m.q) + '</td><td>' + h(m.chosen) + '</td><td>' + h(m.correct) + '</td></tr>'; });
-                  html += '</table>';
-                }
-              }
-            });
-          });
-          body = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Результаты тестов</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt}table{border-collapse:collapse;margin:6px 0 12px}td,th{border:1px solid #999;padding:4px 8px;vertical-align:top}th{background:#e9e2d8}h1{font-size:20pt}h2{font-size:15pt;margin-top:18pt}h3{font-size:12pt}</style></head><body>' + html + '</body></html>';
-          ext = 'doc'; ctype = 'application/msword';
+        const f = buildExport({ att, names, format: d.format === 'csv' ? 'csv' : 'doc', tz: d.tz });
+        // Основной путь: бот присылает файл в личный чат
+        if (await tgSendDoc(me.telegram_id, f.filename, f.buffer, f.mime, 'Результаты тестов стажёров')) out.sent = true;
+        else {
+          // Запасной путь: ссылка на скачивание
+          try {
+            const old = await db.storage.from('images').list('exports', { limit: 100 });
+            const dead = (old.data || []).filter((x) => Date.now() - new Date(x.created_at).getTime() > 3600e3).map((x) => 'exports/' + x.name);
+            if (dead.length) await db.storage.from('images').remove(dead);
+            const path = 'exports/' + Date.now() + '-' + f.filename;
+            chk(await db.storage.from('images').upload(path, f.buffer, { contentType: f.mime }));
+            const sg = await db.storage.from('images').createSignedUrl(path, 600, { download: f.filename });
+            if (sg.error) throw sg.error;
+            out.url = sg.data.signedUrl;
+          } catch (e) {
+            throw new Error('Не получилось отправить файл. Открой чат с ботом, нажми Start и повтори');
+          }
         }
-        // Удаляем выгрузки старше часа, чтобы не копились
-        try {
-          const old = await db.storage.from('images').list('exports', { limit: 100 });
-          const dead = (old.data || []).filter((f) => Date.now() - new Date(f.created_at).getTime() > 3600e3).map((f) => 'exports/' + f.name);
-          if (dead.length) await db.storage.from('images').remove(dead);
-        } catch (e) { /* не критично */ }
-        const path = 'exports/' + Date.now() + '.' + ext;
-        chk(await db.storage.from('images').upload(path, Buffer.from(body, 'utf8'), { contentType: ctype }));
-        const sg = await db.storage.from('images').createSignedUrl(path, 600, { download: 'test-results-' + stamp + '.' + ext });
-        if (sg.error) throw sg.error;
-        out.url = sg.data.signedUrl;
       }
     }
     else if (action === 'notify') {
