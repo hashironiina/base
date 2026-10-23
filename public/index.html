@@ -60,6 +60,11 @@ input[type=radio],input[type=checkbox]{width:22px;height:22px;padding:0;margin:0
 .rich th{background:#e2d0c3}
 #pvbar{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#3a2f27;color:#fff;font:400 15px Arsenal,'Trebuchet MS',sans-serif}
 #pvbar button{min-height:34px;background:#d6a07c;border-color:#b3764d;color:#000}
+#lb{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center}
+#lb img{max-width:100%;max-height:100%;object-fit:contain;margin:0;border-radius:0;touch-action:pinch-zoom pan-x pan-y}
+.lbx,.lbn{position:fixed;width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.2);color:#fff;font-size:22px}
+.lbx{top:16px;right:16px}.lbn{top:50%;transform:translateY(-50%)}.lbl{left:10px}.lbr{right:10px}
+.lbc{position:fixed;bottom:18px;left:0;right:0;text-align:center;color:#fff;font:400 14px Arsenal,'Trebuchet MS',sans-serif}
 </style></head>
 <body>
 <div class="deco" style="width:249px;height:249px;border-radius:111px;right:-109px;top:-90px"></div>
@@ -83,7 +88,7 @@ async function api(url,body){
 const ERR={read_first:'Сначала отметь все статьи этапа как прочитанные',no_quiz:'Для этого этапа нет теста',trainee_only:'Тест только для стажёров'};
 const act=async b=>{try{return await api('/api/act',b)}catch(e){tg.showAlert(ERR[e.message]||('Ошибка: '+e.message));throw e}};
 const go=t=>{view={t};render()};
-tg.BackButton.onClick(()=>{view={t:'list'};render()});
+tg.BackButton.onClick(()=>{if(document.getElementById('lb'))return closeImg();view={t:'list'};render()});
 
 async function load(){
   try{D=await api('/api/data'+(PV?'?as='+PV.as+'&stage='+(PV.stage||1):''))}catch(e){
@@ -136,7 +141,7 @@ function article(m){
 function articleBase(m){
   const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
   $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div>${a.body_html?`<div class="abody rich">${clean(a.body_html)}</div>`:`<div class=abody>${esc(a.body)}</div>`}`+
-    a.imageUrls.filter(Boolean).map(u=>`<img src="${u}">`).join('')+filesHtml(a)+'</div>'+
+    imgsHtml(a)+filesHtml(a)+'</div>'+
     (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
@@ -330,6 +335,25 @@ const toolbar=()=>`<div class=tb onmousedown="event.preventDefault()">
 <button onclick="wrapSel('f-a')">Arsenal</button><button onclick="wrapSel('f-m')">Montserrat</button><button onclick="wrapSel('f-c')">Моно</button><button onclick="wrapSel('sm')">A−</button><button onclick="wrapSel('lg')">A+</button>
 <button onclick="cmd('removeFormat')">Очистить</button><button onclick="cmd('undo')">↶</button><button onclick="cmd('redo')">↷</button></div>
 <div id=lk class=row style="display:none"><input id=lu placeholder="Адрес ссылки"><button class=main onclick="linkOk()">OK</button></div>`;
+
+// ===== Картинки на весь экран =====
+let IMGS=[],IMI=0;
+function imgsHtml(a){
+  IMGS=(a.imageUrls||[]).filter(Boolean);
+  return IMGS.map((u,i)=>`<img src="${u}" style="cursor:zoom-in" onclick="openImg(${i})">`).join('');
+}
+function openImg(i){
+  IMI=i;
+  let o=document.getElementById('lb');
+  if(!o){o=document.createElement('div');o.id='lb';document.body.appendChild(o)}
+  drawImg();
+}
+function drawImg(){
+  const o=document.getElementById('lb');
+  o.innerHTML=`<img src="${IMGS[IMI]}"><button class=lbx onclick="closeImg()">✕</button>`+(IMGS.length>1?`<button class="lbn lbl" onclick="stepImg(-1)">‹</button><button class="lbn lbr" onclick="stepImg(1)">›</button><div class=lbc>${IMI+1} / ${IMGS.length}</div>`:'');
+}
+function stepImg(d){IMI=(IMI+d+IMGS.length)%IMGS.length;drawImg()}
+function closeImg(){const o=document.getElementById('lb');if(o)o.remove()}
 
 // ===== Файлы в статьях (PDF, Word) =====
 let FU=[];
@@ -525,8 +549,9 @@ const dt=s=>new Date(s).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',ho
 let TA=[];
 async function exportRes(fmt,id){
   const r=await act({action:'exportResults',format:fmt,telegram_id:id||undefined,tz:Intl.DateTimeFormat().resolvedOptions().timeZone});
-  if(!r.url)return tg.showAlert('Нечего выгружать: попыток теста пока нет');
-  tg.openLink(r.url);
+  if(r.empty)return tg.showAlert('Нечего выгружать: попыток теста пока нет');
+  if(r.sent)return tg.showAlert('Файл отправлен тебе в чат с ботом. Открой чат и нажми на файл.');
+  if(r.url)tg.openLink(r.url);
 }
 function trBlock(P,by){
   if(!P.trainees.length)return'';
