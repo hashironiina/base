@@ -158,6 +158,19 @@ async function broadcast(users, text, appUrl) {
   return { sent, failed };
 }
 
+// Если стажёр прошёл последний этап, он автоматически становится бариста
+async function promoteIfDone(me, newStage, appUrl) {
+  const top = chk(await db.from('articles').select('stage').in('access', ['staff', 'all']).eq('draft', false)
+    .order('stage', { ascending: false }).limit(1)).data;
+  const max = (top[0] && top[0].stage) || 0;
+  if (!(max > 0 && newStage > max)) return false;
+  chk(await db.from('users').update({ role: 'reader' }).eq('telegram_id', me.telegram_id));
+  const admins = chk(await db.from('users').select('telegram_id,name').eq('role', 'admin')).data;
+  await broadcast(admins, '🎓 ' + me.name + ' прошёл(а) обучение. Роль изменена: стажёр → бариста.', appUrl);
+  await tgSend(me.telegram_id, '🎉 Обучение пройдено! Теперь тебе открыты все материалы.', appUrl);
+  return true;
+}
+
 // Состояние текущего этапа стажёра: сколько статей, все ли открыты, есть ли тест
 async function stageState(me) {
   const cur = chk(await db.from('articles').select('id').in('access', ['staff', 'all']).eq('draft', false).eq('stage', me.stage)).data;
@@ -186,15 +199,17 @@ module.exports = async (req, res) => {
     if (action === 'read') {
       chk(await db.from('reads').upsert({ telegram_id: me.telegram_id, article_id: d.article_id }));
       let advanced = false;
+      let graduated = false;
       // Если у этапа нет теста, он открывается сам, когда стажёр открыл все его статьи
       if (me.role === 'trainee') {
         const s = await stageState(me);
         if (s.count > 0 && s.allRead && !s.hasQuiz) {
           chk(await db.from('users').update({ stage: me.stage + 1 }).eq('telegram_id', me.telegram_id));
           advanced = true;
+          graduated = await promoteIfDone(me, me.stage + 1, appUrl);
         }
       }
-      return res.json({ ok: 1, advanced });
+      return res.json({ ok: 1, advanced, graduated });
     }
 
     // Тест стажёра: вопросы без правильных ответов, проверка на сервере
@@ -225,11 +240,15 @@ module.exports = async (req, res) => {
         const a = Number(d.answers && d.answers[i]);
         return { q: x.q, chosen: x.options[a] != null ? x.options[a] : '—', correct: x.options[x.correct], ok: a === x.correct };
       });
+      let graduated = false;
       if (!pv) {
         chk(await db.from('quiz_attempts').insert({ telegram_id: me.telegram_id, stage: me.stage, score, passed, detail }));
-        if (passed) chk(await db.from('users').update({ stage: me.stage + 1 }).eq('telegram_id', me.telegram_id));
+        if (passed) {
+          chk(await db.from('users').update({ stage: me.stage + 1 }).eq('telegram_id', me.telegram_id));
+          graduated = await promoteIfDone(me, me.stage + 1, appUrl);
+        }
       }
-      return res.json({ ok: 1, score, passed, wrong, preview: pv, wrongQ: detail.filter((m) => !m.ok).map((m) => m.q) });
+      return res.json({ ok: 1, score, passed, wrong, graduated, preview: pv, wrongQ: detail.filter((m) => !m.ok).map((m) => m.q) });
     }
 
     // Предложения по улучшению: отправлять могут все
