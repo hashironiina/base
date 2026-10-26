@@ -468,7 +468,7 @@ async function markRead(id){
   const r=await act({action:'read',article_id:id});
   if(!D.read.includes(id))D.read.push(id);
   tcheck();
-  if(r.advanced){tg.showAlert('Открылся следующий этап!');await load();return}
+  if(r.advanced){tg.showAlert(r.graduated?'Обучение пройдено! Теперь у тебя роль бариста: открыты все материалы.':'Открылся следующий этап!');await load();return}
   render();
 }
 
@@ -512,7 +512,7 @@ async function sendQuiz(){
   if(QZ.questions.some((_,i)=>QZ.ans[i]===undefined))return tg.showAlert('Ответь на все вопросы');
   const r=await act({action:'quizSubmit',preview_stage:D.preview?D.preview.stage:undefined,answers:QZ.questions.map((_,i)=>QZ.ans[i])});
   $.innerHTML=H+`<h2>${r.passed?'Тест сдан 🎉':'Пока не сдан'}</h2><p>Результат: ${r.score}%</p>${r.preview?'<p class=hint>Режим просмотра: результат не сохранён.</p>':''}`+
-    (r.passed?(r.preview?'<p>Тест пройден.</p>':'<p>Открылся следующий этап.</p>'):`<p>Вопросы с ошибками:</p>${(r.wrongQ||[]).map(q=>'<div class=card style="cursor:default">'+esc(q)+'</div>').join('')}<p>Перечитай статьи этапа и попробуй ещё раз.</p>`)+
+    (r.passed?(r.preview?'<p>Тест пройден.</p>':r.graduated?'<p><b>Обучение пройдено! 🎉</b><br>Теперь у тебя роль бариста: открыты все материалы.</p>':'<p>Открылся следующий этап.</p>'):`<p>Вопросы с ошибками:</p>${(r.wrongQ||[]).map(q=>'<div class=card style="cursor:default">'+esc(q)+'</div>').join('')}<p>Перечитай статьи этапа и попробуй ещё раз.</p>`)+
     '<div class=row><button class=main onclick="view={t:\'list\'};load()">К статьям</button></div>';
 }
 async function quizzes(){
