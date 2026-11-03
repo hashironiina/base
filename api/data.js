@@ -20,7 +20,7 @@ module.exports = async (req, res) => {
     : real;
   const levels = VISIBLE[me.role] || ['all'];
 
-  let aq = db.from('articles').select('*').in('access', levels).order('sort_order').order('id');
+  let aq = db.from('articles').select('*').is('deleted_at', null).in('access', levels).order('sort_order').order('id');
   // Стажёр видит только статьи уже открытых этапов (этап статьи от 1 до его текущего)
   if (me.role === 'trainee') aq = aq.gte('stage', 1).lte('stage', me.stage);
   // Черновики видит только редактор (в режиме просмотра их тоже не видно)
@@ -43,7 +43,7 @@ module.exports = async (req, res) => {
   if (me.role === 'trainee') {
     const readSet = new Set((r.data || []).map((x) => x.article_id));
     const cur = articles.filter((x) => x.stage === me.stage);
-    const top = await db.from('articles').select('stage').in('access', ['staff', 'all']).eq('draft', false)
+    const top = await db.from('articles').select('stage').in('access', ['staff', 'all']).eq('draft', false).is('deleted_at', null)
       .order('stage', { ascending: false }).limit(1);
     const max = (top.data && top.data[0] && top.data[0].stage) || 0;
     const qz = await db.from('quizzes').select('questions').eq('stage', me.stage).maybeSingle();
