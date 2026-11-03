@@ -47,7 +47,7 @@ function zipStore(files) {
 }
 
 const wx = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const wrun = (t, o = {}) => '<w:r><w:rPr>' + (o.b ? '<w:b/>' : '') + (o.i ? '<w:i/>' : '') + (o.sz ? '<w:sz w:val="' + o.sz + '"/>' : '') +
+const wrun = (t, o = {}) => '<w:r><w:rPr>' + (o.b ? '<w:b/>' : '') + (o.i ? '<w:i/>' : '') + (o.s ? '<w:strike/>' : '') + (o.sz ? '<w:sz w:val="' + o.sz + '"/>' : '') + (o.u ? '<w:u w:val="single"/>' : '') +
   '</w:rPr><w:t xml:space="preserve">' + wx(t) + '</w:t></w:r>';
 const wpara = (t, o = {}) => '<w:p><w:pPr><w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 120 : o.after) + '"/></w:pPr>' + wrun(t, o) + '</w:p>';
 const wcell = (t, w, hdr) => '<w:tc><w:tcPr><w:tcW w:w="' + w + '" w:type="dxa"/>' + (hdr ? '<w:shd w:val="clear" w:color="auto" w:fill="E9E2D8"/>' : '') + '</w:tcPr>' +
@@ -119,6 +119,183 @@ function buildExport({ att, names, format, tz }) {
   };
 }
 
+// ---- Выгрузка всей базы знаний в Word (.docx) ----
+const HX = (s) => String(s == null ? '' : s)
+  .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'")
+  .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&');
+// Разбираем простой HTML статьи в дерево
+function parseHtml(html) {
+  const root = { tag: 'root', cls: '', children: [] };
+  const stack = [root];
+  const VOID = new Set(['br', 'hr', 'img', 'col']);
+  const re = /<(\/?)([a-zA-Z0-9]+)([^>]*)>|([^<]+)/g;
+  let m;
+  while ((m = re.exec(String(html || '')))) {
+    const cur = stack[stack.length - 1];
+    if (m[4] != null) { cur.children.push({ text: HX(m[4]) }); continue; }
+    const tag = m[2].toLowerCase();
+    const attrs = m[3] || '';
+    if (m[1] === '/') {
+      for (let i = stack.length - 1; i > 0; i--) if (stack[i].tag === tag) { stack.length = i; break; }
+      continue;
+    }
+    const node = { tag, cls: (attrs.match(/class="([^"]*)"/) || [])[1] || '', children: [] };
+    cur.children.push(node);
+    if (!VOID.has(tag) && !/\/\s*$/.test(attrs)) stack.push(node);
+  }
+  return root;
+}
+const rr = (t, o = {}) => wrun(t, o);
+const pp = (runs, o = {}) => '<w:p><w:pPr>' + (o.style ? '<w:pStyle w:val="' + o.style + '"/>' : '') +
+  (o.border ? '<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="999999"/></w:pBdr>' : '') +
+  (o.shade ? '<w:shd w:val="clear" w:color="auto" w:fill="' + o.shade + '"/>' : '') +
+  (o.after != null || o.before != null ? '<w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 120 : o.after) + '"/>' : '') +
+  (o.ind ? '<w:ind w:left="' + o.ind + '"' + (o.hang ? ' w:hanging="' + o.hang + '"' : '') + '/>' : '') +
+  '</w:pPr>' + (Array.isArray(runs) ? runs.join('') : runs) + '</w:p>';
+function textOf(nodes) {
+  let s = '';
+  for (const n of nodes) {
+    if (n.text != null) s += n.text;
+    else if (n.tag === 'br') s += '\n';
+    else { s += textOf(n.children); if (['p', 'li', 'tr'].includes(n.tag)) s += '\n'; }
+  }
+  return s;
+}
+function inl(nodes, f, out) {
+  for (const n of nodes) {
+    if (n.text != null) { if (n.text) out.push(rr(n.text, f)); continue; }
+    if (n.tag === 'br') { out.push('<w:r><w:br/></w:r>'); continue; }
+    const g = { ...f };
+    if (n.tag === 'strong' || n.tag === 'b') g.b = 1;
+    if (n.tag === 'em' || n.tag === 'i') g.i = 1;
+    if (n.tag === 'u' || n.tag === 'a') g.u = 1;
+    if (n.tag === 's' || n.tag === 'strike') g.s = 1;
+    inl(n.children, g, out);
+  }
+  return out;
+}
+const BLK = new Set(['p', 'h1', 'h2', 'h3', 'ul', 'ol', 'blockquote', 'div', 'table', 'hr', 'li', 'thead', 'tbody', 'tr']);
+function listOut(n, ctx, out, depth) {
+  let i = 0;
+  const check = n.cls.includes('chk');
+  for (const li of n.children.filter((c) => c.tag === 'li')) {
+    i++;
+    const mark = check ? '☐ ' : n.tag === 'ol' ? i + '. ' : '• ';
+    const kids = li.children.filter((c) => c.text != null || (c.tag !== 'ul' && c.tag !== 'ol'));
+    out.push(pp([rr(mark, {})].concat(inl(kids, {}, [])), { ind: (ctx.ind || 0) + 360 + depth * 360, hang: 260, after: 60, shade: ctx.shade }));
+    li.children.filter((c) => c.tag === 'ul' || c.tag === 'ol').forEach((sub) => listOut(sub, ctx, out, depth + 1));
+  }
+}
+function tableOut(n) {
+  const rows = [];
+  (function find(nodes) {
+    for (const c of nodes) {
+      if (c.tag === 'tr') rows.push(c.children.filter((x) => x.tag === 'td' || x.tag === 'th').map((x) => textOf(x.children).trim()));
+      else if (c.children) find(c.children);
+    }
+  })(n.children);
+  const cols = Math.max(1, ...rows.map((r) => r.length));
+  if (!rows.length) return '';
+  const w = Math.floor(9400 / cols);
+  return wtable(rows.map((r) => { const x = r.slice(); while (x.length < cols) x.push(''); return x; }), new Array(cols).fill(w));
+}
+function blocks(nodes, ctx, out) {
+  let buf = [];
+  const flush = () => {
+    if (buf.length && textOf(buf).trim()) out.push(pp(inl(buf, {}, []), { ind: ctx.ind, shade: ctx.shade }));
+    buf = [];
+  };
+  for (const n of nodes) {
+    if (n.text != null || !BLK.has(n.tag)) { buf.push(n); continue; }
+    flush();
+    const t = n.tag;
+    if (t === 'p') { if (textOf(n.children).trim()) out.push(pp(inl(n.children, {}, []), { ind: ctx.ind, shade: ctx.shade })); }
+    else if (t === 'h1' || t === 'h2') out.push(pp(inl(n.children, {}, []), { style: 'Heading3' }));
+    else if (t === 'h3') out.push(pp(inl(n.children, {}, []), { style: 'Heading4' }));
+    else if (t === 'ul' || t === 'ol') listOut(n, ctx, out, 0);
+    else if (t === 'blockquote') blocks(n.children, { ...ctx, ind: (ctx.ind || 0) + 400 }, out);
+    else if (t === 'div') blocks(n.children, n.cls.includes('note') ? { ...ctx, shade: 'F3E5DA' } : ctx, out);
+    else if (t === 'hr') out.push(pp('', { border: 1 }));
+    else if (t === 'table') out.push(tableOut(n));
+    else blocks(n.children, ctx, out);
+  }
+  flush();
+}
+const STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+  '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/></w:rPr></w:rPrDefault>' +
+  '<w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
+  '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +
+  [['Heading1', 'heading 1', 0, 36, '<w:pageBreakBefore/>', 360], ['Heading2', 'heading 2', 1, 28, '', 240], ['Heading3', 'heading 3', 2, 24, '', 200], ['Heading4', 'heading 4', 3, 22, '', 160]].map(
+    ([id, name, lvl, sz, extra, before]) => '<w:style w:type="paragraph" w:styleId="' + id + '"><w:name w:val="' + name + '"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/>' + extra +
+      '<w:spacing w:before="' + before + '" w:after="120"/><w:outlineLvl w:val="' + lvl + '"/></w:pPr><w:rPr><w:b/><w:sz w:val="' + sz + '"/></w:rPr></w:style>').join('') +
+  '</w:styles>';
+
+function buildKnowledgeDoc({ sections, articles, tz }) {
+  const zone = typeof tz === 'string' && tz.length < 60 ? tz : 'Europe/Moscow';
+  let when;
+  try { when = new Date().toLocaleDateString('ru-RU', { timeZone: zone, day: '2-digit', month: '2-digit', year: 'numeric' }); } catch (e) { when = new Date().toISOString().slice(0, 10); }
+  const secs = sections.filter((s) => articles.some((a) => a.section_id === s.id));
+  const inSec = (s) => articles.filter((a) => a.section_id === s.id);
+  let body = pp([rr('База знаний', { b: 1, sz: 44 })], { after: 80 }) +
+    pp([rr('Версия от ' + when + '. Без черновиков и материалов для партнёров.', { i: 1 })], { after: 240 }) +
+    pp([rr('Содержание', { b: 1, sz: 28 })], { before: 120 });
+  secs.forEach((s) => {
+    body += pp([rr(s.title, { b: 1 })], { before: 120, after: 40 });
+    inSec(s).forEach((a) => { body += pp([rr('• ' + a.title, {})], { ind: 360, after: 20 }); });
+  });
+  secs.forEach((s) => {
+    body += pp([rr(s.title, {})], { style: 'Heading1' });
+    inSec(s).forEach((a) => {
+      body += pp([rr(a.title, {})], { style: 'Heading2' });
+      const out = [];
+      if (a.body_html) blocks(parseHtml(a.body_html).children, {}, out);
+      else String(a.body || '').split('\n').forEach((l) => { if (l.trim()) out.push(pp([rr(l, {})])); });
+      body += out.join('');
+      if ((a.files || []).length) body += pp([rr('Прикреплённые файлы: ' + a.files.map((f) => f.title).join(', '), { i: 1 })], { before: 120 });
+      if ((a.images || []).length) body += pp([rr('Фото: ' + a.images.length + ' шт. (смотри в приложении)', { i: 1 })]);
+    });
+  });
+  const doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body +
+    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr></w:body></w:document>';
+  const types = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>';
+  const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
+  const drels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+  return {
+    buffer: zipStore([
+      { name: '[Content_Types].xml', data: Buffer.from(types, 'utf8') },
+      { name: '_rels/.rels', data: Buffer.from(rels, 'utf8') },
+      { name: 'word/document.xml', data: Buffer.from(doc, 'utf8') },
+      { name: 'word/styles.xml', data: Buffer.from(STYLES, 'utf8') },
+      { name: 'word/_rels/document.xml.rels', data: Buffer.from(drels, 'utf8') },
+    ]),
+    filename: 'knowledge-base-' + new Date().toISOString().slice(0, 10) + '.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+}
+
+// Снимок текущей версии статьи для истории
+const snapRow = (cur, me) => ({
+  article_id: cur.id, replaced_by: me.telegram_id, section_id: cur.section_id, title: cur.title,
+  body: cur.body || '', body_html: cur.body_html == null ? null : cur.body_html, access: cur.access,
+  stage: cur.stage || 0, draft: !!cur.draft, images: cur.images || [], files: cur.files || [],
+});
+// Доставка файла редактору: сначала в чат с ботом, запасной путь — ссылка
+async function deliverFile(me, f, caption) {
+  if (await tgSendDoc(me.telegram_id, f.filename, f.buffer, f.mime, caption)) return { sent: true };
+  try {
+    const old = await db.storage.from('images').list('exports', { limit: 100 });
+    const dead = (old.data || []).filter((x) => Date.now() - new Date(x.created_at).getTime() > 3600e3).map((x) => 'exports/' + x.name);
+    if (dead.length) await db.storage.from('images').remove(dead);
+    const path = 'exports/' + Date.now() + '-' + f.filename;
+    chk(await db.storage.from('images').upload(path, f.buffer, { contentType: f.mime }));
+    const sg = await db.storage.from('images').createSignedUrl(path, 600, { download: f.filename });
+    if (sg.error) throw sg.error;
+    return { url: sg.data.signedUrl };
+  } catch (e) {
+    throw new Error('Не получилось отправить файл. Открой чат с ботом, нажми Start и повтори');
+  }
+}
+
 // Отправка файла в личный чат с ботом (надёжнее, чем ссылка из приложения)
 async function tgSendDoc(chatId, filename, buffer, mime, caption) {
   try {
@@ -160,7 +337,7 @@ async function broadcast(users, text, appUrl) {
 
 // Если стажёр прошёл последний этап, он автоматически становится бариста
 async function promoteIfDone(me, newStage, appUrl) {
-  const top = chk(await db.from('articles').select('stage').in('access', ['staff', 'all']).eq('draft', false)
+  const top = chk(await db.from('articles').select('stage').in('access', ['staff', 'all']).eq('draft', false).is('deleted_at', null)
     .order('stage', { ascending: false }).limit(1)).data;
   const max = (top[0] && top[0].stage) || 0;
   if (!(max > 0 && newStage > max)) return false;
@@ -173,7 +350,7 @@ async function promoteIfDone(me, newStage, appUrl) {
 
 // Состояние текущего этапа стажёра: сколько статей, все ли открыты, есть ли тест
 async function stageState(me) {
-  const cur = chk(await db.from('articles').select('id').in('access', ['staff', 'all']).eq('draft', false).eq('stage', me.stage)).data;
+  const cur = chk(await db.from('articles').select('id').in('access', ['staff', 'all']).eq('draft', false).is('deleted_at', null).eq('stage', me.stage)).data;
   let readCount = 0;
   if (cur.length) {
     readCount = chk(await db.from('reads').select('article_id')
@@ -268,6 +445,11 @@ module.exports = async (req, res) => {
       await broadcast(admins, '💡 Предложение №' + row.id + ' (' + kinds[kind] + ')\nот: ' + me.name + (art ? '\nСтатья: «' + art + '»' : '') + '\n\n' + text, appUrl);
       return res.json({ ok: 1 });
     }
+    // Свои предложения и ответы на них видит каждый
+    if (action === 'sugMine') {
+      return res.json({ ok: 1, items: chk(await db.from('suggestions').select('id,kind,text,status,reply,replied_at,created_at')
+        .eq('created_by', me.telegram_id).order('created_at', { ascending: false }).limit(30)).data });
+    }
     // Всё остальное только для редакторов
     if (me.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
 
@@ -295,8 +477,66 @@ module.exports = async (req, res) => {
           .order('sort_order', { ascending: false }).limit(1)).data;
         row.sort_order = ((mx[0] && mx[0].sort_order) || 0) + 1;
       }
+      // История: перед правкой сохраняем прежнюю версию (если что-то изменилось), храним последние 30
+      if (d.id) {
+        const cur = chk(await db.from('articles').select('*').eq('id', d.id)).data[0];
+        if (cur) {
+          const same = cur.title === row.title && (cur.body || '') === row.body && (cur.body_html || null) === (row.body_html || null) &&
+            cur.access === row.access && (cur.stage || 0) === row.stage && !!cur.draft === row.draft && cur.section_id === row.section_id &&
+            JSON.stringify(cur.images || []) === JSON.stringify(row.images) && JSON.stringify(cur.files || []) === JSON.stringify(row.files);
+          if (!same) {
+            chk(await db.from('article_versions').insert(snapRow(cur, me)));
+            const extra = chk(await db.from('article_versions').select('id').eq('article_id', cur.id)
+              .order('replaced_at', { ascending: false }).range(30, 300)).data;
+            if (extra.length) chk(await db.from('article_versions').delete().in('id', extra.map((x) => x.id)));
+          }
+        }
+      }
       const r = chk(await save('articles', row).select('id'));
       out.id = d.id || (r.data[0] && r.data[0].id);
+    }
+    else if (action === 'versionList') {
+      const items = chk(await db.from('article_versions').select('id,replaced_at,replaced_by,title').eq('article_id', d.article_id)
+        .order('replaced_at', { ascending: false }).limit(30)).data;
+      const names = {};
+      chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { names[u.telegram_id] = u.name; });
+      out.items = items.map((v) => ({ id: v.id, replaced_at: v.replaced_at, title: v.title, by: names[v.replaced_by] || null }));
+    }
+    else if (action === 'versionGet') {
+      const v = chk(await db.from('article_versions').select('title,body').eq('id', d.id)).data[0];
+      if (!v) throw new Error('Версия не найдена');
+      out.title = v.title;
+      out.body = v.body;
+    }
+    else if (action === 'versionRestore') {
+      const v = chk(await db.from('article_versions').select('*').eq('id', d.id)).data[0];
+      if (!v) throw new Error('Версия не найдена');
+      const cur = chk(await db.from('articles').select('*').eq('id', v.article_id)).data[0];
+      if (!cur) throw new Error('Статья не найдена');
+      // Текущая версия тоже сохраняется, чтобы возврат можно было отменить
+      chk(await db.from('article_versions').insert(snapRow(cur, me)));
+      const sec = chk(await db.from('sections').select('id').eq('id', v.section_id)).data[0];
+      chk(await db.from('articles').update({
+        section_id: sec ? v.section_id : cur.section_id, title: v.title, body: v.body, body_html: v.body_html,
+        access: v.access, stage: v.stage, draft: v.draft, images: v.images, files: v.files,
+        updated_at: new Date().toISOString(), updated_by: me.telegram_id,
+      }).eq('id', cur.id));
+    }
+    else if (action === 'trashList') {
+      // Всё, что лежит в корзине дольше 30 дней, удаляется насовсем
+      const lim = new Date(Date.now() - 30 * 864e5).toISOString();
+      chk(await db.from('articles').delete().not('deleted_at', 'is', null).lt('deleted_at', lim));
+      out.items = chk(await db.from('articles').select('id,title,deleted_at').not('deleted_at', 'is', null).order('deleted_at', { ascending: false })).data;
+    }
+    else if (action === 'trashRestore') chk(await db.from('articles').update({ deleted_at: null }).eq('id', d.id));
+    else if (action === 'trashPurge') chk(await db.from('articles').delete().eq('id', d.id).not('deleted_at', 'is', null));
+    else if (action === 'exportAll') {
+      // Вся база знаний в Word: без черновиков, без материалов для партнёров, без удалённых
+      const secs = chk(await db.from('sections').select('id,title,sort_order').order('sort_order')).data;
+      const arts = chk(await db.from('articles').select('id,section_id,title,body,body_html,images,files')
+        .in('access', ['staff', 'all']).eq('draft', false).is('deleted_at', null).order('sort_order').order('id')).data;
+      if (!arts.length) out.empty = true;
+      else Object.assign(out, await deliverFile(me, buildKnowledgeDoc({ sections: secs, articles: arts, tz: d.tz }), 'База знаний (без черновиков и материалов для партнёров)'));
     }
     else if (action === 'sugList') {
       const items = chk(await db.from('suggestions').select('*').order('created_at', { ascending: false }).limit(100)).data;
@@ -307,6 +547,15 @@ module.exports = async (req, res) => {
       if (ids.length) chk(await db.from('articles').select('id,title').in('id', ids)).data.forEach((a) => { titles[a.id] = a.title; });
       out.items = items.map((x) => ({ ...x, art: x.article_id ? titles[x.article_id] || null : null }));
       out.names = names;
+    }
+    else if (action === 'sugReply') {
+      const text = String(d.text || '').trim().slice(0, 2000);
+      if (!text) throw new Error('Впиши текст ответа');
+      const sg = chk(await db.from('suggestions').select('id,created_by,text,status').eq('id', d.id)).data[0];
+      if (!sg) throw new Error('Предложение не найдено');
+      chk(await db.from('suggestions').update({ reply: text, replied_at: new Date().toISOString(), status: sg.status === 'new' ? 'seen' : sg.status }).eq('id', d.id));
+      const quote = sg.text.length > 120 ? sg.text.slice(0, 120) + '…' : sg.text;
+      out.delivered = await tgSend(sg.created_by, '💬 Ответ на твоё предложение №' + sg.id + '\n«' + quote + '»\n\n' + text, appUrl);
     }
     else if (action === 'sugStatus') {
       if (!['new', 'seen', 'done'].includes(d.status)) throw new Error('Неверный статус');
@@ -397,7 +646,7 @@ module.exports = async (req, res) => {
       const rs = await Promise.all(ids.map((id, i) => db.from('articles').update({ sort_order: i + 1 }).eq('id', id)));
       rs.forEach(chk);
     }
-    else if (action === 'deleteArticle') chk(await db.from('articles').delete().eq('id', d.id));
+    else if (action === 'deleteArticle') chk(await db.from('articles').update({ deleted_at: new Date().toISOString() }).eq('id', d.id));
     else if (action === 'upload') {
       const name = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.jpg';
       chk(await db.storage.from('images').upload(name, Buffer.from(d.data, 'base64'), { contentType: 'image/jpeg' }));
@@ -450,7 +699,7 @@ module.exports = async (req, res) => {
       chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { nmap[u.telegram_id] = u.name; });
       out.names = nmap;
       out.trainees = chk(await db.from('users').select('telegram_id,name,stage').eq('role', 'trainee').order('name')).data;
-      out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).eq('draft', false).order('section_id').order('sort_order').order('id')).data;
+      out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).eq('draft', false).is('deleted_at', null).order('section_id').order('sort_order').order('id')).data;
       let attempts = [];
       for (let i = 0; ; i += 1000) {
         const x = chk(await db.from('quiz_attempts').select('id,telegram_id,stage,score,passed,created_at,detail')
