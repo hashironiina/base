@@ -102,12 +102,12 @@ function render(){
   const m=D.me.role==='admin';
   pvBar();
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,suggest,sugs})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,suggest,sugs,mysugs,history,trash})[view.t]();
 }
 
 function list(m){
   $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button></div>`:'')+
+    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button><button onclick="go('trash')">🗑 Корзина</button><button onclick="exportAll()">📄 Выгрузить базу знаний</button></div>`:'')+
     sugRow()+'<div id=res></div>';
   results();
 }
@@ -142,7 +142,7 @@ function articleBase(m){
   const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
   $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div>${a.body_html?`<div class="abody rich">${clean(a.body_html)}</div>`:`<div class=abody>${esc(a.body)}</div>`}`+
     imgsHtml(a)+filesHtml(a)+'</div>'+
-    (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
+    (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button onclick="view={t:'history',id:${a.id}};render()">История</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
 function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],files:[],html:'',access:'staff',stage:0,draft:false,notify:false,prev:{}};view={t:'edit'};render()}
@@ -159,6 +159,8 @@ function edit(){
   <select onchange="E.access=this.value"><option value=staff ${E.access==='staff'?'selected':''}>Видят: бариста</option><option value=partners ${E.access==='partners'?'selected':''}>Видят: партнёры</option><option value=all ${E.access==='all'?'selected':''}>Видят: все</option></select>
   <select onchange="E.stage=+this.value"><option value=0 ${!E.stage?'selected':''}>Стажёр не видит</option>${[1,2,3,4,5,6].map(n=>`<option value=${n} ${E.stage===n?'selected':''}>Стажёр: этап ${n}</option>`).join('')}</select>
   <input placeholder="Название" value="${esc(E.title)}" oninput="E.title=this.value">
+  <p class=hint>Импорт текста из файла (Word .docx, PDF или .txt). Текст добавится в конец статьи:</p>
+  <input type=file accept=".docx,.pdf,.txt" onchange="importText(this.files[0])"><p id=is class=hint></p>
   ${toolbar()}
   <div id=ed class="ed rich" contenteditable=true oninput="E.html=this.innerHTML">${clean(E.html)}</div>
   ${E.images.map((n,i)=>`<div><img src="${E.prev[n]||''}"><button class=danger onclick="E.images.splice(${i},1);edit()">Убрать фото</button></div>`).join('')}
@@ -187,7 +189,7 @@ async function saveA(){
   if(E.notify&&E.draft)tg.showAlert('Это черновик: уведомление не отправлено');else if(E.notify&&sv.id){const r=await act({action:'notify',article_id:sv.id,kind:E.id?'updated':'new'});report(r)}
   view={t:'list'};await load();
 }
-function delA(id){tg.showConfirm('Удалить статью?',async ok=>{if(!ok)return;await act({action:'deleteArticle',id});view={t:'list'};load()})}
+function delA(id){tg.showConfirm('Удалить статью? Она попадёт в корзину на 30 дней.',async ok=>{if(!ok)return;await act({action:'deleteArticle',id});view={t:'list'};load()})}
 
 function sections(){
   $.innerHTML=H+'<h2>Разделы</h2>'+D.sections.map(s=>`<div class=row><input id=s${s.id} value="${esc(s.title)}"><button class=main onclick="saveS(${s.id},${s.sort_order})">OK</button><button class=danger onclick="delS(${s.id})">✕</button></div>`).join('')+
@@ -336,6 +338,83 @@ const toolbar=()=>`<div class=tb onmousedown="event.preventDefault()">
 <button onclick="cmd('removeFormat')">Очистить</button><button onclick="cmd('undo')">↶</button><button onclick="cmd('redo')">↷</button></div>
 <div id=lk class=row style="display:none"><input id=lu placeholder="Адрес ссылки"><button class=main onclick="linkOk()">OK</button></div>`;
 
+// ===== Импорт текста из файла в статью =====
+function loadScript(src){
+  return new Promise((ok,fail)=>{
+    if(document.querySelector('script[src="'+src+'"]'))return ok();
+    const s=document.createElement('script');s.src=src;s.onload=ok;
+    s.onerror=()=>fail(new Error('не удалось загрузить модуль чтения файлов (нет доступа к cdnjs.cloudflare.com)'));
+    document.head.appendChild(s);
+  });
+}
+function pdfParas(pages) {
+  const lines = [];
+  pages.forEach((items, pi) => {
+    let cur = null;
+    for (const it of items) {
+      if (!it.str) continue;
+      const x = it.transform[4], y = it.transform[5], h = Math.abs(it.transform[3]) || 10;
+      if (cur && Math.abs(y - cur.y) < h * 0.5) {
+        cur.t += (x - cur.x1 > h * 0.15 ? ' ' : '') + it.str;
+        cur.x1 = x + (it.width || 0);
+      } else {
+        if (cur) lines.push(cur);
+        cur = { t: it.str, y, h, p: pi, x1: x + (it.width || 0) };
+      }
+    }
+    if (cur) lines.push(cur);
+  });
+  const paras = [];
+  let buf = '', prev = null;
+  const endS = (s) => /[.!?…:;)»"]$/.test(s);
+  const mark = (s) => /^([•▪●☐\-–—]|\d+[.)])\s/.test(s);
+  for (const l of lines) {
+    const t = l.t.replace(/\s+/g, ' ').trim();
+    if (!t) continue;
+    const gap = prev && prev.p === l.p ? Math.abs(prev.y - l.y) : 0;
+    const sizeJump = prev && (l.h > prev.h * 1.15 || l.h < prev.h * 0.85);
+    if (!buf || gap > l.h * 1.8 || sizeJump || buf.length < 45 || endS(buf) || mark(t)) {
+      if (buf) paras.push(buf);
+      buf = t;
+    } else buf += ' ' + t;
+    prev = l;
+  }
+  if (buf) paras.push(buf);
+  return paras.map((t) => '<p>' + esc(t) + '</p>').join('');
+}
+
+async function pdfToHtml(f){
+  const base='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  await loadScript(base+'pdf.min.js');
+  pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(new Blob(['importScripts("'+base+'pdf.worker.min.js");'],{type:'text/javascript'}));
+  const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise;
+  const pages=[];
+  for(let i=1;i<=pdf.numPages;i++)pages.push((await(await pdf.getPage(i)).getTextContent()).items);
+  return pdfParas(pages);
+}
+async function importText(f){
+  if(!f)return;
+  const say=t=>{const e=document.getElementById('is');if(e)e.textContent=t};
+  const n=f.name.toLowerCase();
+  try{
+    say('Читаю файл…');
+    let html='';
+    if(n.endsWith('.docx')){
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+      html=(await mammoth.convertToHtml({arrayBuffer:await f.arrayBuffer()})).value;
+    }else if(n.endsWith('.pdf'))html=await pdfToHtml(f);
+    else if(n.endsWith('.txt'))html=plain(await f.text());
+    else{say('');return tg.showAlert('Подходят файлы .docx, .pdf и .txt. Файл .doc сначала сохрани как .docx')}
+    html=clean(html);
+    if(!html.replace(/<[^>]*>/g,'').trim()){say('');return tg.showAlert('Текста в файле не нашлось. Возможно, это скан или картинка')}
+    ED().insertAdjacentHTML('beforeend',html);
+    E.html=ED().innerHTML;
+    if(!E.title.trim())E.title=f.name.replace(/\.[^.]+$/,'');
+    edit();
+    tg.showAlert('Текст добавлен в конец статьи. Проверь оформление и сохрани');
+  }catch(e){say('');tg.showAlert('Не получилось прочитать файл: '+e.message)}
+}
+
 // ===== Картинки на весь экран =====
 let IMGS=[],IMI=0;
 function imgsHtml(a){
@@ -424,12 +503,55 @@ async function mv(id,dir){
   try{await api('/api/act',{action:'reorder',ids:arr.map(x=>x.id)})}catch(e){tg.showAlert('Не удалось сохранить порядок');load()}
 }
 
+// ===== История изменений, корзина, выгрузка базы знаний (только редактор) =====
+async function history(){
+  $.innerHTML=H+'Загрузка…';
+  const r=await act({action:'versionList',article_id:view.id});
+  const a=D.articles.find(x=>x.id===view.id);
+  $.innerHTML=H+`<h2>История: ${esc(a?a.title:'')}</h2><p class=hint>Версии статьи до правок. Нажми на версию, чтобы посмотреть её и вернуть.</p>`+
+    (r.items.map(v=>`<div class=card onclick="showVer(${v.id})"><b>${dt(v.replaced_at)}</b> · ${esc(v.by||'?')}<br><small class=hint>${esc(v.title)}</small><div id="v${v.id}" style="display:none" onclick="event.stopPropagation()"></div></div>`).join('')||'<p class=hint>Правок пока не было.</p>');
+}
+async function showVer(id){
+  const el=document.getElementById('v'+id);
+  if(el.style.display==='block'){el.style.display='none';return}
+  const r=await act({action:'versionGet',id});
+  const t=r.body||'';
+  el.innerHTML=`<p style="white-space:pre-wrap;margin:8px 0">${esc(t.slice(0,2500))}${t.length>2500?'…':''}</p><div class=row><button class=main onclick="restoreVer(${id})">Вернуть эту версию</button></div>`;
+  el.style.display='block';
+}
+function restoreVer(id){
+  tg.showConfirm('Вернуть эту версию? Текущая тоже сохранится в истории.',async ok=>{
+    if(!ok)return;
+    await act({action:'versionRestore',id});
+    view={t:'list'};await load();tg.showAlert('Версия возвращена');
+  });
+}
+async function trash(){
+  $.innerHTML=H+'Загрузка…';
+  const r=await act({action:'trashList'});
+  $.innerHTML=H+'<h2>Корзина</h2><p class=hint>Удалённые статьи хранятся 30 дней, потом исчезают насовсем.</p>'+
+    (r.items.map(a=>`<div class=card style="cursor:default"><b>${esc(a.title)}</b><br><small class=hint>удалена ${dt(a.deleted_at)}</small><div class=row><button class=main onclick="restoreArt(${a.id})">Восстановить</button><button class=danger onclick="purgeArt(${a.id})">Удалить навсегда</button></div></div>`).join('')||'<p class=hint>Корзина пуста.</p>');
+}
+async function restoreArt(id){await act({action:'trashRestore',id});await load();view={t:'trash'};render()}
+function purgeArt(id){tg.showConfirm('Удалить насовсем? Вернуть будет нельзя.',async ok=>{if(!ok)return;await act({action:'trashPurge',id});trash()})}
+let EXPALL=false;
+async function exportAll(){
+  if(EXPALL)return;
+  EXPALL=true;tg.showAlert('Готовлю документ, это может занять несколько секунд…');
+  try{
+    const r=await act({action:'exportAll',tz:Intl.DateTimeFormat().resolvedOptions().timeZone});
+    if(r.empty)return tg.showAlert('Нечего выгружать: нет опубликованных статей');
+    if(r.sent)return tg.showAlert('Файл отправлен тебе в чат с ботом. Открой чат и нажми на файл.');
+    if(r.url)tg.openLink(r.url);
+  }finally{EXPALL=false}
+}
+
 // ===== Предложения по улучшению =====
 let SG=null;
 const SKIND={idea:'Идея',error:'Ошибка в статье',other:'Другое'};
 const SST={new:'новое',seen:'рассмотрено',done:'сделано'};
 function sugRow(){
-  return '<div class=row><button onclick="SG=null;go(\'suggest\')">💡 Предложить улучшение</button>'+(D.me.role==='admin'?'<button onclick="go(\'sugs\')">Предложения</button>':'')+'</div>';
+  return '<div class=row><button onclick="SG=null;go(\'suggest\')">💡 Предложить улучшение</button>'+(D.me.role==='admin'?'<button onclick="go(\'sugs\')">Предложения</button>':'<button onclick="go(\'mysugs\')">Мои предложения</button>')+'</div>';
 }
 function sugFor(id){SG={kind:'error',text:'',article:id};go('suggest')}
 function suggest(){
@@ -453,7 +575,20 @@ async function sendSug(){
 async function sugs(){
   $.innerHTML=H+'Загрузка…';
   const r=await act({action:'sugList'});
-  $.innerHTML=H+'<h2>Предложения</h2>'+(r.items.map(s=>`<div class=card style="cursor:default"><b>${SKIND[s.kind]}</b> · <i>${SST[s.status]}</i><br><small class=hint>от ${esc(r.names[s.created_by]||'?')} · ${dt(s.created_at)}${s.art?' · статья «'+esc(s.art)+'»':''}</small><br>${esc(s.text).replace(/\n/g,'<br>')}<div class=row><button onclick="setSug(${s.id},'seen')">Рассмотрено</button><button class=main onclick="setSug(${s.id},'done')">Сделано</button></div></div>`).join('')||'<p class=hint>Предложений пока нет.</p>');
+  $.innerHTML=H+'<h2>Предложения</h2>'+(r.items.map(s=>`<div class=card style="cursor:default"><b>${SKIND[s.kind]}</b> · <i>${SST[s.status]}</i><br><small class=hint>от ${esc(r.names[s.created_by]||'?')} · ${dt(s.created_at)}${s.art?' · статья «'+esc(s.art)+'»':''}</small><br>${esc(s.text).replace(/\n/g,'<br>')}${s.reply?`<div style="margin-top:8px;padding-left:10px;border-left:3px solid var(--acc)"><small class=hint>Твой ответ · ${dt(s.replied_at)}</small><br>${esc(s.reply).replace(/\n/g,'<br>')}</div>`:''}<div class=row><button class=main onclick="replyBox(${s.id})">${s.reply?'Изменить ответ':'Ответить'}</button><button onclick="setSug(${s.id},'seen')">Рассмотрено</button><button onclick="setSug(${s.id},'done')">Сделано</button></div><div id="rb${s.id}" style="display:none"><textarea id="rt${s.id}" rows=4 placeholder="Твой ответ">${esc(s.reply||'')}</textarea><div class=row><button class=main onclick="sendReply(${s.id})">Отправить ответ</button></div></div></div>`).join('')||'<p class=hint>Предложений пока нет.</p>');
+}
+function replyBox(id){const e=document.getElementById('rb'+id);e.style.display=e.style.display==='block'?'none':'block'}
+async function sendReply(id){
+  const t=document.getElementById('rt'+id).value.trim();
+  if(!t)return tg.showAlert('Впиши текст ответа');
+  const r=await act({action:'sugReply',id,text:t});
+  tg.showAlert(r.delivered?'Ответ отправлен':'Ответ сохранён, но бот не смог его отправить: человеку нужно нажать Start у бота. Он увидит ответ в приложении, в «Мои предложения».');
+  sugs();
+}
+async function mysugs(){
+  $.innerHTML=H+'Загрузка…';
+  const r=await act({action:'sugMine'});
+  $.innerHTML=H+'<h2>Мои предложения</h2>'+(r.items.map(s=>`<div class=card style="cursor:default"><b>${SKIND[s.kind]}</b> · <i>${SST[s.status]}</i><br><small class=hint>${dt(s.created_at)}</small><br>${esc(s.text).replace(/\n/g,'<br>')}${s.reply?`<div style="margin-top:8px;padding-left:10px;border-left:3px solid var(--acc)"><small class=hint>Ответ · ${dt(s.replied_at)}</small><br>${esc(s.reply).replace(/\n/g,'<br>')}</div>`:''}</div>`).join('')||'<p class=hint>Пока нет отправленных предложений.</p>');
 }
 async function setSug(id,status){await act({action:'sugStatus',id,status});sugs()}
 
