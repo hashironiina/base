@@ -107,7 +107,7 @@ function render(){
 
 function list(m){
   $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button><button onclick="go('trash')">🗑 Корзина</button><button onclick="exportAll()">📄 Выгрузить базу знаний</button></div>`:'')+
+    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button><button onclick="go('trash')">🗑 Корзина (удалённые статьи)</button><button onclick="exportAll()">📄 Выгрузить базу знаний</button></div>`:'')+
     sugRow()+'<div id=res></div>';
   results();
 }
@@ -193,13 +193,13 @@ function delA(id){tg.showConfirm('Удалить статью? Она попад
 
 function sections(){
   $.innerHTML=H+'<h2>Разделы</h2>'+D.sections.map(s=>`<div class=row><input id=s${s.id} value="${esc(s.title)}"><button class=main onclick="saveS(${s.id},${s.sort_order})">OK</button><button class=danger onclick="delS(${s.id})">✕</button></div>`).join('')+
-  `<h3>Новый раздел</h3><div class=row><input id=sn placeholder="Название"><button class=main onclick="saveS(0,${D.sections.length+1})">Добавить</button></div><p class=hint>При удалении раздела удаляются и все его статьи.</p>`;
+  `<h3>Новый раздел</h3><div class=row><input id=sn placeholder="Название"><button class=main onclick="saveS(0,${D.sections.length+1})">Добавить</button></div><p class=hint>Раздел можно удалить, только когда в нём нет статей. Статьи сначала перенеси в другой раздел через «Изменить».</p>`;
 }
 async function saveS(id,so){
   const v=document.getElementById(id?'s'+id:'sn').value.trim();if(!v)return;
   await act({action:'saveSection',id:id||undefined,title:v,sort_order:so});await load();
 }
-function delS(id){tg.showConfirm('Удалить раздел вместе со статьями?',async ok=>{if(!ok)return;await act({action:'deleteSection',id});await load()})}
+function delS(id){tg.showConfirm('Удалить пустой раздел?',async ok=>{if(!ok)return;await act({action:'deleteSection',id});await load()})}
 
 async function users(){
   $.innerHTML=H+'Загрузка…';
