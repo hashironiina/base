@@ -457,7 +457,12 @@ module.exports = async (req, res) => {
     const save = (t, o) => (d.id ? db.from(t).update(o).eq('id', d.id) : db.from(t).insert(o));
 
     if (action === 'saveSection') chk(await save('sections', { title: d.title, sort_order: d.sort_order || 0 }));
-    else if (action === 'deleteSection') chk(await db.from('sections').delete().eq('id', d.id));
+    else if (action === 'deleteSection') {
+      // Защита: раздел удаляется, только когда в нём нет статей (в том числе в корзине)
+      const n = chk(await db.from('articles').select('id').eq('section_id', d.id)).data.length;
+      if (n > 0) throw new Error('В этом разделе ещё есть статьи (' + n + ', считая корзину). Раздел можно удалить, только когда он пустой: перенеси статьи в другой раздел через «Изменить»');
+      chk(await db.from('sections').delete().eq('id', d.id));
+    }
     else if (action === 'saveArticle') {
       const row = {
         section_id: d.section_id, title: d.title, body: d.body || '', images: d.images || [],
@@ -523,9 +528,7 @@ module.exports = async (req, res) => {
       }).eq('id', cur.id));
     }
     else if (action === 'trashList') {
-      // Всё, что лежит в корзине дольше 30 дней, удаляется насовсем
-      const lim = new Date(Date.now() - 30 * 864e5).toISOString();
-      chk(await db.from('articles').delete().not('deleted_at', 'is', null).lt('deleted_at', lim));
+      // Только показываем список, ничего не удаляя
       out.items = chk(await db.from('articles').select('id,title,deleted_at').not('deleted_at', 'is', null).order('deleted_at', { ascending: false })).data;
     }
     else if (action === 'trashRestore') chk(await db.from('articles').update({ deleted_at: null }).eq('id', d.id));
@@ -646,7 +649,12 @@ module.exports = async (req, res) => {
       const rs = await Promise.all(ids.map((id, i) => db.from('articles').update({ sort_order: i + 1 }).eq('id', id)));
       rs.forEach(chk);
     }
-    else if (action === 'deleteArticle') chk(await db.from('articles').update({ deleted_at: new Date().toISOString() }).eq('id', d.id));
+    else if (action === 'deleteArticle') {
+      chk(await db.from('articles').update({ deleted_at: new Date().toISOString() }).eq('id', d.id));
+      // Статьи, пролежавшие в корзине больше 30 дней, убираются насовсем
+      const lim = new Date(Date.now() - 30 * 864e5).toISOString();
+      chk(await db.from('articles').delete().not('deleted_at', 'is', null).lt('deleted_at', lim));
+    }
     else if (action === 'upload') {
       const name = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.jpg';
       chk(await db.storage.from('images').upload(name, Buffer.from(d.data, 'base64'), { contentType: 'image/jpeg' }));
