@@ -252,7 +252,6 @@ function buildKnowledgeDoc({ sections, articles, tz }) {
       else String(a.body || '').split('\n').forEach((l) => { if (l.trim()) out.push(pp([rr(l, {})])); });
       body += out.join('');
       if ((a.files || []).length) body += pp([rr('Прикреплённые файлы: ' + a.files.map((f) => f.title).join(', '), { i: 1 })], { before: 120 });
-      if ((a.videos || []).length) body += pp([rr('Видео: ' + a.videos.map((v) => v.title).join(', ') + ' (смотри в приложении)', { i: 1 })]);
       if ((a.images || []).length) body += pp([rr('Фото: ' + a.images.length + ' шт. (смотри в приложении)', { i: 1 })]);
     });
   });
@@ -471,15 +470,6 @@ module.exports = async (req, res) => {
         access: ['staff', 'partners', 'all'].includes(d.access) ? d.access : 'staff',
         stage: Math.max(0, Math.min(9, Number(d.stage) || 0)),
         draft: !!d.draft,
-        videos: (Array.isArray(d.videos) ? d.videos : []).slice(0, 5).map((v) => {
-          if (v && typeof v.path === 'string' && v.path.startsWith('videos/')) return { path: v.path, title: String(v.title || 'Видео').slice(0, 200), size: Number(v.size) || 0 };
-          if (v && typeof v.url === 'string' && /^https:\/\//i.test(v.url)) return { url: v.url.slice(0, 500), title: String(v.title || 'Видео').slice(0, 200) };
-          return null;
-        }).filter(Boolean),
-        files: (Array.isArray(d.files) ? d.files : [])
-          .filter((f) => f && typeof f.path === 'string' && f.path.startsWith('files/'))
-          .slice(0, 10)
-          .map((f) => ({ path: f.path, title: String(f.title || 'Файл').slice(0, 200), size: Number(f.size) || 0 })),
         updated_at: new Date().toISOString(), updated_by: me.telegram_id,
       };
       // Новая статья встаёт в конец своего раздела
@@ -542,7 +532,7 @@ module.exports = async (req, res) => {
     else if (action === 'exportAll') {
       // Вся база знаний в Word: без черновиков, без материалов для партнёров, без удалённых
       const secs = chk(await db.from('sections').select('id,title,sort_order').order('sort_order')).data;
-      const arts = chk(await db.from('articles').select('id,section_id,title,body,body_html,images,files,videos')
+      const arts = chk(await db.from('articles').select('id,section_id,title,body,body_html,images,files')
         .in('access', ['staff', 'all']).eq('draft', false).is('deleted_at', null).order('sort_order').order('id')).data;
       if (!arts.length) out.empty = true;
       else Object.assign(out, await deliverFile(me, buildKnowledgeDoc({ sections: secs, articles: arts, tz: d.tz }), 'База знаний (без черновиков и материалов для партнёров)'));
@@ -572,16 +562,6 @@ module.exports = async (req, res) => {
       if (sg && d.status !== 'new' && sg.created_by !== me.telegram_id) {
         await tgSend(sg.created_by, '💡 Твоё предложение №' + sg.id + ': ' + (d.status === 'done' ? 'сделано, спасибо!' : 'рассмотрено'), appUrl);
       }
-    }
-    else if (action === 'videoUrl') {
-      // Адрес для прямой загрузки видео в хранилище
-      const ext = ['.mp4', '.mov', '.m4v', '.webm'].includes(d.ext) ? d.ext : null;
-      if (!ext) throw new Error('Подходят видео .mp4, .mov, .m4v и .webm');
-      const path = 'videos/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext;
-      const r = await db.storage.from('images').createSignedUploadUrl(path);
-      if (r.error) throw r.error;
-      out.signedUrl = r.data.signedUrl;
-      out.path = path;
     }
     else if (action === 'fileUrl') {
       // Адрес для прямой загрузки файла в хранилище (в обход лимита размера Vercel)
