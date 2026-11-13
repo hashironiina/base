@@ -73,6 +73,13 @@ module.exports = async (req, res) => {
     furls[f.path] = (data && data.signedUrl) || '';
   }));
 
+  // Видео: загруженные файлы получают временную ссылку на 1 час (ссылки на внешние видео остаются как есть)
+  const vurls = {};
+  await Promise.all(articles.flatMap((x) => x.videos || []).filter((v) => v.path).map(async (v) => {
+    const { data } = await db.storage.from('images').createSignedUrl(v.path, 3600);
+    vurls[v.path] = (data && data.signedUrl) || '';
+  }));
+
   res.json({
     me: { id: me.telegram_id, name: me.name, role: me.role },
     preview: as ? { as, stage: me.stage } : null,
@@ -82,6 +89,7 @@ module.exports = async (req, res) => {
       ...x,
       imageUrls: x.images.map((n) => urls[n] || ''),
       files: (x.files || []).map((f) => ({ ...f, url: furls[f.path] || '' })),
+      videos: (x.videos || []).map((v) => (v.path ? { ...v, url: vurls[v.path] || '' } : v)),
     })),
     read: (r.data || []).map((x) => x.article_id),
   });
