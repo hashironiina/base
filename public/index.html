@@ -102,13 +102,13 @@ function render(){
   const m=D.me.role==='admin';
   pvBar();
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,suggest,sugs,mysugs,history,trash,locs})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,suggest,sugs,mysugs,history,trash,locs,myloc})[view.t]();
 }
 
 function list(m){
   $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
     (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button><button onclick="go('locs')">📍 Локации</button><button onclick="go('trash')">🗑 Корзина (удалённые статьи)</button><button onclick="exportAll()">📄 Выгрузить базу знаний</button></div>`:'')+
-    sugRow()+'<div id=res></div>';
+    seniorRow()+sugRow()+'<div id=res></div>';
   results();
 }
 const tag=a=>D.me.role==='admin'?`<span class=tag>${a.draft?'черновик · ':''}${a.access==='partners'?'партнёры':a.access==='all'?'все':'бариста'}${a.stage>0?' · этап '+a.stage:''}</span>`:'';
@@ -202,7 +202,7 @@ async function saveS(id,so){
 function delS(id){tg.showConfirm('Удалить пустой раздел?',async ok=>{if(!ok)return;await act({action:'deleteSection',id});await load()})}
 
 let LOCS=[];
-const lname=u=>{const l=LOCS.find(x=>x.id===u.location_id);return l?' · 📍 '+esc(l.name):''};
+const lname=u=>{const l=LOCS.find(x=>x.id===u.location_id);return l?' · 📍 '+esc(l.name):(u.role==='senior'?' · ⚠ без локации':'')};
 const locSel=u=>LOCS.length?`<select style="width:auto;max-width:150px;margin:0" onchange="setLoc(${u.telegram_id},this.value)"><option value="">📍 нет</option>${LOCS.map(l=>`<option value=${l.id} ${u.location_id===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select>`:'';
 async function setLoc(id,v){await act({action:'setLocation',telegram_id:id,location_id:v||null});users()}
 async function users(){
@@ -210,10 +210,31 @@ async function users(){
   const {users:U,locations:L}=await act({action:'listUsers'});
   LOCS=L||[];
   $.innerHTML=H+'<h2>Люди с доступом</h2>'+
-  `<div class=card style="cursor:default"><b>Добавить человека</b><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=trainee>Стажёр</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select>${LOCS.length?`<select id=ul><option value="">Без локации</option>${LOCS.map(l=>`<option value=${l.id}>📍 ${esc(l.name)}</option>`).join('')}</select>`:''}<div class=row><button class=main onclick="addU()">Добавить</button></div><small class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</small></div>`+
+  `<div class=card style="cursor:default"><b>Добавить человека</b><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=senior>Старший бариста</option><option value=trainee>Стажёр</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select>${LOCS.length?`<select id=ul><option value="">Без локации</option>${LOCS.map(l=>`<option value=${l.id}>📍 ${esc(l.name)}</option>`).join('')}</select>`:''}<div class=row><button class=main onclick="addU()">Добавить</button></div><small class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</small></div>`+
   `<h3>Список (${U.length})</h3>`+
   U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${lab(u)}${lname(u)}<br><small class=hint>${u.telegram_id}</small></span>${roleSel(u)}${locSel(u)}${u.role==='trainee'?`<button onclick="stg(${u.telegram_id},${u.stage-1})">−</button><button onclick="stg(${u.telegram_id},${u.stage+1})">+</button>`:''}<button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('');
 }
+// ===== Старший бариста: стажёры своей локации =====
+function seniorRow(){
+  if(D.me.role!=='senior')return'';
+  return '<div class=row><button class=acc onclick="go(\'myloc\')">📍 Моя локация</button><button onclick="go(\'progress\')">Прогресс стажёров</button></div>';
+}
+async function myloc(){
+  $.innerHTML=H+'Загрузка…';
+  const r=await act({action:'seniorTrainees'});
+  $.innerHTML=H+'<h2>Моя локация</h2><p class=hint>📍 '+esc(r.location||'—')+'</p>'+
+    `<div class=card style="cursor:default"><b>Добавить стажёра</b><input id=sn1 placeholder="Имя"><input id=si1 placeholder="Telegram ID (число)" inputmode=numeric><div class=row><button class=main onclick="addTrainee()">Добавить</button></div><small class=hint>Стажёр начнёт с этапа 1. Свой ID он узнаёт у бота @userinfobot. Результаты тестов и прогресс: кнопка «Прогресс стажёров».</small></div>`+
+    `<h3>Стажёры (${r.items.length})</h3>`+
+    (r.items.map(t=>`<div class=card style="cursor:default"><b>${esc(t.name)}</b> — этап ${t.stage}<br><small class=hint>${t.telegram_id}</small></div>`).join('')||'<p class=hint>Стажёров пока нет.</p>');
+}
+async function addTrainee(){
+  const n=document.getElementById('sn1').value.trim(),i=document.getElementById('si1').value.trim();
+  if(!n||!/^\d+$/.test(i))return tg.showAlert('Нужны имя и ID из цифр');
+  await act({action:'seniorAdd',name:n,telegram_id:i});
+  tg.showAlert('Стажёр добавлен');
+  myloc();
+}
+
 // ===== Локации (только редактор) =====
 async function locs(){
   $.innerHTML=H+'Загрузка…';
@@ -231,8 +252,8 @@ async function saveLoc(id){
   locs();
 }
 function delLoc(id){tg.showConfirm('Удалить локацию?',async ok=>{if(!ok)return;await act({action:'locDelete',id});locs()})}
-const lab=u=>u.role==='admin'?'редактор':u.role==='partner'?'партнёр':u.role==='trainee'?`стажёр · этап ${u.stage}`:'читает';
-const roleSel=u=>u.telegram_id===D.me.id?'':`<select style="width:auto;margin:0" onchange="setRole(${u.telegram_id},this.value)">${[['reader','Читает'],['trainee','Стажёр'],['partner','Партнёр'],['admin','Редактор']].map(([v,t])=>`<option value=${v} ${u.role===v?'selected':''}>${t}</option>`).join('')}</select>`;
+const lab=u=>u.role==='admin'?'редактор':u.role==='senior'?'старший бариста':u.role==='partner'?'партнёр':u.role==='trainee'?`стажёр · этап ${u.stage}`:'читает';
+const roleSel=u=>u.telegram_id===D.me.id?'':`<select style="width:auto;margin:0" onchange="setRole(${u.telegram_id},this.value)">${[['reader','Читает'],['senior','Старший бариста'],['trainee','Стажёр'],['partner','Партнёр'],['admin','Редактор']].map(([v,t])=>`<option value=${v} ${u.role===v?'selected':''}>${t}</option>`).join('')}</select>`;
 async function setRole(id,role){await act({action:'setRole',telegram_id:id,role});users()}
 async function stg(id,s){if(s<1)return;await act({action:'setStage',telegram_id:id,stage:s});users()}
 async function addU(){
@@ -252,6 +273,7 @@ async function progress(){
     if(ids.has(r.telegram_id))cnt[r.article_id]=(cnt[r.article_id]||0)+1;
   });
   PR={P,by};
+  if(D.me.role==='senior'){$.innerHTML=H+'<h2>Стажёры моей локации</h2>'+(trBlock(P,by)||'<p class=hint>На твоей локации пока нет стажёров.</p>');return}
   const total=P.articles.length;
   const rows=P.users.map(u=>({u,n:P.articles.filter(a=>(by[u.telegram_id]||new Set()).has(a.id)).length})).sort((a,b)=>a.n-b.n);
   $.innerHTML=H+'<h2>Кто что прочитал</h2><p class=hint>«Прочитано» значит «открыл статью». Нажми на имя, чтобы увидеть, что не открыто.</p>'+
