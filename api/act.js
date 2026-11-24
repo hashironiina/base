@@ -451,7 +451,13 @@ module.exports = async (req, res) => {
         .eq('created_by', me.telegram_id).order('created_at', { ascending: false }).limit(30)).data });
     }
     // Всё остальное только для редакторов
-    if (me.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
+    // Старший бариста: только свои действия и только в рамках своей локации
+    let scope = null;
+    if (me.role === 'senior' && ['progress', 'exportResults', 'seniorTrainees', 'seniorAdd'].includes(action)) {
+      if (!me.location_id) throw new Error('Тебе пока не назначена локация. Напиши шеф-баристе');
+      const people = chk(await db.from('users').select('telegram_id,name,role,stage,location_id').eq('location_id', me.location_id)).data;
+      scope = { people, ids: people.map((p) => p.telegram_id) };
+    } else if (me.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
 
     const out = { ok: 1 };
     const save = (t, o) => (d.id ? db.from(t).update(o).eq('id', d.id) : db.from(t).insert(o));
@@ -495,6 +501,26 @@ module.exports = async (req, res) => {
       }
       const r = chk(await save('articles', row).select('id'));
       out.id = d.id || (r.data[0] && r.data[0].id);
+    }
+    else if (action === 'seniorTrainees') {
+      if (!scope) throw new Error('Только для старшего бариста');
+      out.items = scope.people.filter((p) => p.role === 'trainee');
+      const l = chk(await db.from('locations').select('name').eq('id', me.location_id)).data[0];
+      out.location = l ? l.name : '';
+    }
+    else if (action === 'seniorAdd') {
+      // Старший бариста добавляет стажёров только на свою локацию
+      if (!scope) throw new Error('Только для старшего бариста');
+      const id = Number(d.telegram_id);
+      const name = String(d.name || '').trim().slice(0, 80);
+      if (!id || !name) throw new Error('Нужны имя и Telegram ID (число)');
+      const ex = chk(await db.from('users').select('telegram_id,role,location_id').eq('telegram_id', id)).data[0];
+      if (ex && ex.role !== 'trainee') throw new Error('Этот человек уже есть в списке с другой ролью');
+      if (ex && ex.location_id && ex.location_id !== me.location_id) throw new Error('Этот стажёр уже прикреплён к другой локации');
+      chk(await db.from('users').upsert({ telegram_id: id, name, role: 'trainee', location_id: me.location_id }));
+      const l = chk(await db.from('locations').select('name').eq('id', me.location_id)).data[0];
+      const admins = chk(await db.from('users').select('telegram_id,name').eq('role', 'admin')).data;
+      await broadcast(admins, '👤 ' + me.name + ' (старший бариста) добавил(а) стажёра ' + name + (l ? ' на локацию «' + l.name + '»' : ''), appUrl);
     }
     else if (action === 'versionList') {
       const items = chk(await db.from('article_versions').select('id,replaced_at,replaced_by,title').eq('article_id', d.article_id)
@@ -588,6 +614,7 @@ module.exports = async (req, res) => {
         let q = db.from('quiz_attempts').select('telegram_id,stage,score,passed,created_at,detail')
           .order('created_at', { ascending: true }).range(i, i + 999);
         if (d.telegram_id) q = q.eq('telegram_id', d.telegram_id);
+        if (scope) q = q.in('telegram_id', scope.ids);
         const x = chk(await q).data;
         att = att.concat(x);
         if (x.length < 1000) break;
@@ -664,7 +691,7 @@ module.exports = async (req, res) => {
     }
     else if (action === 'saveUser') chk(await db.from('users').upsert({
       telegram_id: Number(d.telegram_id), name: d.name,
-      role: ['admin', 'partner', 'trainee'].includes(d.role) ? d.role : 'reader',
+      role: ['admin', 'partner', 'trainee', 'senior'].includes(d.role) ? d.role : 'reader',
       ...(Number(d.location_id) ? { location_id: Number(d.location_id) } : {}),
     }));
     else if (action === 'setLocation') chk(await db.from('users').update({ location_id: Number(d.location_id) || null }).eq('telegram_id', d.telegram_id));
@@ -693,7 +720,7 @@ module.exports = async (req, res) => {
     }
     else if (action === 'setRole') {
       if (Number(d.telegram_id) === me.telegram_id) throw new Error('Свою роль менять нельзя');
-      if (!['admin', 'reader', 'partner', 'trainee'].includes(d.role)) throw new Error('Неверная роль');
+      if (!['admin', 'reader', 'partner', 'trainee', 'senior'].includes(d.role)) throw new Error('Неверная роль');
       chk(await db.from('users').update({ role: d.role }).eq('telegram_id', d.telegram_id));
     }
     else if (action === 'setStage') chk(await db.from('users')
@@ -749,6 +776,17 @@ module.exports = async (req, res) => {
         if (x.length < 1000) break;
       }
       out.reads = reads;
+      // Старшему баристе показываем только людей его локации
+      if (scope) {
+        const ok = new Set(scope.ids);
+        out.users = [];
+        out.trainees = out.trainees.filter((t) => ok.has(t.telegram_id));
+        out.attempts = out.attempts.filter((a) => ok.has(a.telegram_id));
+        out.reads = out.reads.filter((r) => ok.has(r.telegram_id));
+        const nm = {};
+        Object.keys(out.names).forEach((k) => { if (ok.has(Number(k))) nm[k] = out.names[k]; });
+        out.names = nm;
+      }
     }
     else return res.status(400).json({ error: 'bad_action' });
 
