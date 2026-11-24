@@ -6,6 +6,7 @@ const VISIBLE = {
   reader: ['staff', 'all'],
   partner: ['partners', 'all'],
   trainee: ['staff', 'all'],
+  senior: ['staff', 'all'],
 };
 
 module.exports = async (req, res) => {
