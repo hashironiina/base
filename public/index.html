@@ -65,7 +65,6 @@ input[type=radio],input[type=checkbox]{width:22px;height:22px;padding:0;margin:0
 .lbx,.lbn{position:fixed;width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.2);color:#fff;font-size:22px}
 .lbx{top:16px;right:16px}.lbn{top:50%;transform:translateY(-50%)}.lbl{left:10px}.lbr{right:10px}
 .lbc{position:fixed;bottom:18px;left:0;right:0;text-align:center;color:#fff;font:400 14px Arsenal,'Trebuchet MS',sans-serif}
-video{width:100%;max-height:70vh;margin:8px 0;border-radius:16px;background:#000;display:block}
 </style></head>
 <body>
 <div class="deco" style="width:249px;height:249px;border-radius:111px;right:-109px;top:-90px"></div>
@@ -103,12 +102,12 @@ function render(){
   const m=D.me.role==='admin';
   pvBar();
   view.t==='list'?tg.BackButton.hide():tg.BackButton.show();
-  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,suggest,sugs,mysugs,history,trash})[view.t]();
+  ({list:()=>list(m),article:()=>article(m),edit,sections,users,progress,quiz,quizzes,qedit,news,qstats,preview,suggest,sugs,mysugs,history,trash,locs})[view.t]();
 }
 
 function list(m){
   $.innerHTML=H+banner()+`<input class=search placeholder="Поиск..." value="${esc(q)}" oninput="q=this.value;results()">`+
-    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button><button onclick="go('trash')">🗑 Корзина (удалённые статьи)</button><button onclick="exportAll()">📄 Выгрузить базу знаний</button></div>`:'')+
+    (m?`<div class=row><button class=acc onclick="newArt()">+ Новая статья</button><button onclick="go('sections')">Разделы</button><button onclick="go('users')">Люди</button><button onclick="go('progress')">Прогресс</button><button onclick="go('quizzes')">Тесты</button><button class="${ORD?'main':''}" onclick="ORD=!ORD;list(true)">${ORD?'Готово':'Порядок'}</button><button onclick="go('news')">Новости</button><button onclick="go('preview')">👁 Просмотр как…</button><button onclick="go('locs')">📍 Локации</button><button onclick="go('trash')">🗑 Корзина (удалённые статьи)</button><button onclick="exportAll()">📄 Выгрузить базу знаний</button></div>`:'')+
     sugRow()+'<div id=res></div>';
   results();
 }
@@ -142,14 +141,14 @@ function article(m){
 function articleBase(m){
   const a=D.articles.find(x=>x.id===view.id),s=D.sections.find(x=>x.id===a.section_id);
   $.innerHTML=H+`<h3 style="margin-top:0">${esc(s?s.title:'')}</h3><div class="box abox"><div class=atitle>${esc(a.title)}</div>${a.body_html?`<div class="abody rich">${clean(a.body_html)}</div>`:`<div class=abody>${esc(a.body)}</div>`}`+
-    imgsHtml(a)+videosHtml(a)+filesHtml(a)+'</div>'+
+    imgsHtml(a)+filesHtml(a)+'</div>'+
     (m?`<div class=row><button class=main onclick="editA(${a.id})">Изменить</button><button onclick="view={t:'history',id:${a.id}};render()">История</button><button class=danger onclick="delA(${a.id})">Удалить</button></div>`:'');
 }
 
-function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],files:[],videos:[],html:'',access:'staff',stage:0,draft:false,notify:false,prev:{}};view={t:'edit'};render()}
+function newArt(){E={section_id:D.sections[0]?.id,title:'',body:'',images:[],files:[],html:'',access:'staff',stage:0,draft:false,notify:false,prev:{}};view={t:'edit'};render()}
 function editA(id){
   const a=D.articles.find(x=>x.id===id);
-  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',files:(a.files||[]).map(f=>({...f})),videos:(a.videos||[]).map(v=>({...v})),html:a.body_html||plain(a.body),stage:a.stage||0,draft:!!a.draft,notify:false,prev:{}};
+  E={id,section_id:a.section_id,title:a.title,body:a.body,images:[...a.images],access:a.access||'staff',files:(a.files||[]).map(f=>({...f})),html:a.body_html||plain(a.body),stage:a.stage||0,draft:!!a.draft,notify:false,prev:{}};
   a.images.forEach((n,i)=>E.prev[n]=a.imageUrls[i]);
   view={t:'edit'};render();
 }
@@ -169,10 +168,6 @@ function edit(){
   <p class=hint>Файлы для скачивания (PDF, Word):</p>
   ${E.files.map((f,i)=>`<div class=row><span style="flex:1">📄 ${esc(f.title)}</span><button class=danger onclick="E.files.splice(${i},1);edit()">✕</button></div>`).join('')}
   <input type=file accept=".pdf,.doc,.docx,application/pdf" multiple onchange="addFiles(this.files)"><p id=fs class=hint></p>
-  <p class=hint>Видео (файл до 50 МБ или ссылка на видео):</p>
-  ${E.videos.map((v,i)=>`<div class=row><span style="flex:1">🎬 ${esc(v.title)}${v.url?' (ссылка)':''}</span><button class=danger onclick="E.videos.splice(${i},1);edit()">✕</button></div>`).join('')}
-  <input type=file accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" onchange="addVideos(this.files)"><p id=vs class=hint></p>
-  <div class=row><input id=vl placeholder="Ссылка на видео (YouTube, VK, Rutube, Telegram)"><input id=vt placeholder="Название (необязательно)"><button onclick="addVideoLink()">Добавить ссылку</button></div>
   <label class=opt><input type=checkbox ${E.draft?'checked':''} onchange="E.draft=this.checked">Черновик (пока не виден другим)</label>
   <label class=opt><input type=checkbox onchange="E.notify=this.checked">Отправить уведомление в Telegram</label>
   <div class=row><button class=main onclick="saveA()">Сохранить</button></div>`;
@@ -190,7 +185,7 @@ async function addImgs(files){
 async function saveA(){
   if(!E.title.trim())return tg.showAlert('Впиши название');
   syncBody();
-  const sv=await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,body_html:E.html,draft:E.draft,images:E.images,files:E.files.map(f=>({path:f.path,title:f.title,size:f.size})),videos:E.videos.map(v=>v.path?{path:v.path,title:v.title,size:v.size}:{url:v.url,title:v.title}),access:E.access,stage:E.stage});
+  const sv=await act({action:'saveArticle',id:E.id,section_id:E.section_id,title:E.title.trim(),body:E.body,body_html:E.html,draft:E.draft,images:E.images,files:E.files.map(f=>({path:f.path,title:f.title,size:f.size})),access:E.access,stage:E.stage});
   if(E.notify&&E.draft)tg.showAlert('Это черновик: уведомление не отправлено');else if(E.notify&&sv.id){const r=await act({action:'notify',article_id:sv.id,kind:E.id?'updated':'new'});report(r)}
   view={t:'list'};await load();
 }
@@ -206,14 +201,36 @@ async function saveS(id,so){
 }
 function delS(id){tg.showConfirm('Удалить пустой раздел?',async ok=>{if(!ok)return;await act({action:'deleteSection',id});await load()})}
 
+let LOCS=[];
+const lname=u=>{const l=LOCS.find(x=>x.id===u.location_id);return l?' · 📍 '+esc(l.name):''};
+const locSel=u=>LOCS.length?`<select style="width:auto;max-width:150px;margin:0" onchange="setLoc(${u.telegram_id},this.value)"><option value="">📍 нет</option>${LOCS.map(l=>`<option value=${l.id} ${u.location_id===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select>`:'';
+async function setLoc(id,v){await act({action:'setLocation',telegram_id:id,location_id:v||null});users()}
 async function users(){
   $.innerHTML=H+'Загрузка…';
-  const {users:U}=await act({action:'listUsers'});
+  const {users:U,locations:L}=await act({action:'listUsers'});
+  LOCS=L||[];
   $.innerHTML=H+'<h2>Люди с доступом</h2>'+
-  `<div class=card style="cursor:default"><b>Добавить человека</b><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=trainee>Стажёр</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select><div class=row><button class=main onclick="addU()">Добавить</button></div><small class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</small></div>`+
+  `<div class=card style="cursor:default"><b>Добавить человека</b><input id=un placeholder="Имя"><input id=ui placeholder="Telegram ID (число)" inputmode=numeric><select id=ur><option value=reader>Только читает</option><option value=trainee>Стажёр</option><option value=partner>Партнёр</option><option value=admin>Редактор</option></select>${LOCS.length?`<select id=ul><option value="">Без локации</option>${LOCS.map(l=>`<option value=${l.id}>📍 ${esc(l.name)}</option>`).join('')}</select>`:''}<div class=row><button class=main onclick="addU()">Добавить</button></div><small class=hint>Свой ID бариста узнаёт у бота @userinfobot. Когда человек откроет приложение без доступа, он увидит свой ID на экране.</small></div>`+
   `<h3>Список (${U.length})</h3>`+
-  U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${lab(u)}<br><small class=hint>${u.telegram_id}</small></span>${roleSel(u)}${u.role==='trainee'?`<button onclick="stg(${u.telegram_id},${u.stage-1})">−</button><button onclick="stg(${u.telegram_id},${u.stage+1})">+</button>`:''}<button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('');
+  U.map(u=>`<div class=row><span style="flex:1">${esc(u.name)} · ${lab(u)}${lname(u)}<br><small class=hint>${u.telegram_id}</small></span>${roleSel(u)}${locSel(u)}${u.role==='trainee'?`<button onclick="stg(${u.telegram_id},${u.stage-1})">−</button><button onclick="stg(${u.telegram_id},${u.stage+1})">+</button>`:''}<button class=danger onclick="delU(${u.telegram_id})">✕</button></div>`).join('');
 }
+// ===== Локации (только редактор) =====
+async function locs(){
+  $.innerHTML=H+'Загрузка…';
+  const r=await act({action:'locList'});
+  $.innerHTML=H+'<h2>Локации</h2>'+
+    `<div class=card style="cursor:default"><b>Новая локация</b><input id=ln placeholder="Название (например, ТЦ «Галерея»)"><div class=row><button class=main onclick="saveLoc(0)">Добавить</button></div></div>`+
+    `<h3>Список (${r.items.length})</h3>`+
+    (r.items.map(l=>`<div class=card style="cursor:default"><div class=row><input id="le${l.id}" value="${esc(l.name)}"><button class=main onclick="saveLoc(${l.id})">OK</button><button class=danger onclick="delLoc(${l.id})">✕</button></div><small class=hint>${l.people.length?'Сотрудники: '+l.people.map(x=>esc(x)).join(', '):'Сотрудников пока нет'}</small></div>`).join('')||'<p class=hint>Локаций пока нет. Добавь первую выше.</p>')+
+    (r.unassigned?`<p class=hint>Без локации: ${r.unassigned} чел. Назначить можно в разделе «Люди».</p>`:'');
+}
+async function saveLoc(id){
+  const v=document.getElementById(id?'le'+id:'ln').value.trim();
+  if(!v)return tg.showAlert('Впиши название');
+  await act({action:'locSave',id:id||undefined,name:v});
+  locs();
+}
+function delLoc(id){tg.showConfirm('Удалить локацию?',async ok=>{if(!ok)return;await act({action:'locDelete',id});locs()})}
 const lab=u=>u.role==='admin'?'редактор':u.role==='partner'?'партнёр':u.role==='trainee'?`стажёр · этап ${u.stage}`:'читает';
 const roleSel=u=>u.telegram_id===D.me.id?'':`<select style="width:auto;margin:0" onchange="setRole(${u.telegram_id},this.value)">${[['reader','Читает'],['trainee','Стажёр'],['partner','Партнёр'],['admin','Редактор']].map(([v,t])=>`<option value=${v} ${u.role===v?'selected':''}>${t}</option>`).join('')}</select>`;
 async function setRole(id,role){await act({action:'setRole',telegram_id:id,role});users()}
@@ -221,7 +238,7 @@ async function stg(id,s){if(s<1)return;await act({action:'setStage',telegram_id:
 async function addU(){
   const n=un.value.trim(),i=ui.value.trim();
   if(!n||!/^\d+$/.test(i))return tg.showAlert('Нужны имя и ID из цифр');
-  await act({action:'saveUser',name:n,telegram_id:i,role:ur.value});users();
+  await act({action:'saveUser',name:n,telegram_id:i,role:ur.value,location_id:document.getElementById('ul')?document.getElementById('ul').value||undefined:undefined});users();
 }
 function delU(id){tg.showConfirm('Убрать доступ?',async ok=>{if(!ok)return;await act({action:'deleteUser',telegram_id:id});users()})}
 
@@ -439,49 +456,6 @@ function drawImg(){
 function stepImg(d){IMI=(IMI+d+IMGS.length)%IMGS.length;drawImg()}
 function closeImg(){const o=document.getElementById('lb');if(o)o.remove()}
 
-// ===== Видео в статьях =====
-let VL=[];
-function videosHtml(a){
-  const v=a.videos||[];if(!v.length)return'';
-  VL=v.map(x=>x.url);
-  return v.map((x,i)=>x.path
-    ?(x.url?`<div style="margin-top:12px"><b>${esc(x.title)}</b><video controls playsinline preload="metadata" src="${x.url}#t=0.1"></video></div>`:'<p class=hint>Видео пока недоступно: '+esc(x.title)+'</p>')
-    :`<div class=item onclick="openVid(${i})"><span style="flex:1">🎬 ${esc(x.title)}</span><span class=tag>смотреть</span></div>`).join('');
-}
-function openVid(i){const u=VL[i];if(!u)return;/^https:\/\/t\.me\//.test(u)?tg.openTelegramLink(u):tg.openLink(u)}
-function putWithProgress(url,fd,onp){
-  return new Promise((ok,fail)=>{
-    const x=new XMLHttpRequest();
-    x.open('PUT',url);x.setRequestHeader('x-upsert','false');
-    x.upload.onprogress=e=>{if(e.lengthComputable)onp(Math.round(e.loaded/e.total*100))};
-    x.onload=()=>x.status>=200&&x.status<300?ok():fail(new Error('сервер ответил '+x.status));
-    x.onerror=()=>fail(new Error('нет связи'));
-    x.send(fd);
-  });
-}
-async function addVideos(files){
-  const say=t=>{const e=document.getElementById('vs');if(e)e.textContent=t};
-  for(const f of files){
-    const ext=(f.name.match(/\.(mp4|mov|m4v|webm)$/i)||[])[0];
-    if(!ext){tg.showAlert('Подходят видео .mp4, .mov, .m4v и .webm');continue}
-    if(f.size>50e6){tg.showAlert('Файл «'+f.name+'» больше 50 МБ. Сожми видео или добавь ссылку на него');continue}
-    try{
-      say('Готовлю загрузку…');
-      const u=await act({action:'videoUrl',ext:ext.toLowerCase()});
-      const fd=new FormData();fd.append('cacheControl','3600');fd.append('',f);
-      await putWithProgress(u.signedUrl,fd,p=>say('Загружаю «'+f.name+'»: '+p+'%'));
-      E.videos.push({path:u.path,title:f.name,size:f.size});
-    }catch(e){say('');tg.showAlert('Не удалось загрузить видео: '+e.message+'. Попробуй добавить ссылку на видео.')}
-  }
-  edit();
-}
-function addVideoLink(){
-  const u=document.getElementById('vl').value.trim();
-  if(!/^https:\/\//i.test(u))return tg.showAlert('Вставь ссылку, которая начинается с https://');
-  E.videos.push({url:u,title:document.getElementById('vt').value.trim()||'Видео'});
-  edit();
-}
-
 // ===== Файлы в статьях (PDF, Word) =====
 let FU=[];
 const fsz=s=>s>1e6?(s/1e6).toFixed(1)+' МБ':Math.max(1,Math.round(s/1e3))+' КБ';
@@ -537,7 +511,7 @@ function sendNews(){
 // ===== Порядок статей (режим «Порядок», только редактор) =====
 function item(a,k){
   if(ORD&&!k)return `<div class=item style="align-items:center"><span style="flex:1">${esc(a.title)}</span><span class=mv><button onclick="mv(${a.id},-1)">↑</button><button onclick="mv(${a.id},1)">↓</button></span></div>`;
-  return `<div class=item style="${a.draft?'opacity:.55':''}" onclick="openA(${a.id})"><span>${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}${a.files&&a.files.length?' 📎':''}${a.videos&&a.videos.length?' 🎬':''}</span>${tag(a)}</div>`;
+  return `<div class=item style="${a.draft?'opacity:.55':''}" onclick="openA(${a.id})"><span>${D.read.includes(a.id)?'✓ ':''}${esc(a.title)}${a.files&&a.files.length?' 📎':''}</span>${tag(a)}</div>`;
 }
 async function mv(id,dir){
   const a=D.articles.find(x=>x.id===id);
