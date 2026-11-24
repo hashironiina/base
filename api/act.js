@@ -656,11 +656,41 @@ module.exports = async (req, res) => {
       chk(await db.storage.from('images').upload(name, Buffer.from(d.data, 'base64'), { contentType: 'image/jpeg' }));
       out.name = name;
     }
-    else if (action === 'listUsers') out.users = chk(await db.from('users').select('*').order('name')).data;
+    else if (action === 'listUsers') {
+      out.users = chk(await db.from('users').select('*').order('name')).data;
+      // Локации (если таблица ещё не создана, список просто пустой)
+      const lr = await db.from('locations').select('id,name').order('sort_order').order('name');
+      out.locations = lr.error ? [] : lr.data;
+    }
     else if (action === 'saveUser') chk(await db.from('users').upsert({
       telegram_id: Number(d.telegram_id), name: d.name,
       role: ['admin', 'partner', 'trainee'].includes(d.role) ? d.role : 'reader',
+      ...(Number(d.location_id) ? { location_id: Number(d.location_id) } : {}),
     }));
+    else if (action === 'setLocation') chk(await db.from('users').update({ location_id: Number(d.location_id) || null }).eq('telegram_id', d.telegram_id));
+    else if (action === 'locList') {
+      const locs = chk(await db.from('locations').select('id,name,sort_order').order('sort_order').order('name')).data;
+      const us = chk(await db.from('users').select('telegram_id,name,location_id')).data;
+      out.items = locs.map((l) => ({ ...l, people: us.filter((u) => u.location_id === l.id).map((u) => u.name) }));
+      out.unassigned = us.filter((u) => !u.location_id).length;
+    }
+    else if (action === 'locSave') {
+      const name = String(d.name || '').trim().slice(0, 80);
+      if (!name) throw new Error('Впиши название локации');
+      let r;
+      if (d.id) r = await db.from('locations').update({ name }).eq('id', d.id);
+      else {
+        const mx = chk(await db.from('locations').select('sort_order').order('sort_order', { ascending: false }).limit(1)).data;
+        r = await db.from('locations').insert({ name, sort_order: ((mx[0] && mx[0].sort_order) || 0) + 1 });
+      }
+      if (r.error) throw new Error(/duplicate|unique/i.test(r.error.message) ? 'Такая локация уже есть' : r.error.message);
+    }
+    else if (action === 'locDelete') {
+      // Защита: нельзя удалить локацию, к которой прикреплены сотрудники
+      const n = chk(await db.from('users').select('telegram_id').eq('location_id', d.id)).data.length;
+      if (n > 0) throw new Error('К этой локации прикреплено сотрудников: ' + n + '. Сначала переведи их в другую локацию в разделе «Люди»');
+      chk(await db.from('locations').delete().eq('id', d.id));
+    }
     else if (action === 'setRole') {
       if (Number(d.telegram_id) === me.telegram_id) throw new Error('Свою роль менять нельзя');
       if (!['admin', 'reader', 'partner', 'trainee'].includes(d.role)) throw new Error('Неверная роль');
