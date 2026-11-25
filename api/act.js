@@ -515,6 +515,22 @@ module.exports = async (req, res) => {
       if (!scope) throw new Error('Только для старшего бариста');
       out.items = scope.people.filter((p) => p.role === 'trainee');
       out.locations = chk(await db.from('locations').select('id,name').in('id', scope.locIds)).data;
+      // Бариста его локаций (только имена и роль, без Telegram ID); старшие с дополнительной локацией тоже включены
+      const ur = await db.from('user_locations').select('telegram_id,location_id').in('location_id', scope.locIds);
+      const ex = ur.error ? [] : ur.data;
+      const staff = scope.people.filter((p) => p.role === 'reader' || p.role === 'senior')
+        .map((p) => ({ telegram_id: p.telegram_id, name: p.name, role: p.role, locs: [p.location_id] }));
+      if (ex.length) {
+        const extraUsers = chk(await db.from('users').select('telegram_id,name,role').in('telegram_id', [...new Set(ex.map((e) => e.telegram_id))])).data;
+        extraUsers.forEach((u) => {
+          const mine = ex.filter((e) => e.telegram_id === u.telegram_id).map((e) => e.location_id);
+          const row = staff.find((x) => x.telegram_id === u.telegram_id);
+          if (row) mine.forEach((l) => { if (!row.locs.includes(l)) row.locs.push(l); });
+          else if (u.role === 'reader' || u.role === 'senior') staff.push({ telegram_id: u.telegram_id, name: u.name, role: u.role, locs: mine });
+        });
+      }
+      staff.sort((a, b) => (a.role === b.role ? 0 : a.role === 'senior' ? -1 : 1) || a.name.localeCompare(b.name, 'ru'));
+      out.staff = staff.map((x) => ({ name: x.name, role: x.role, locs: x.locs, me: x.telegram_id === me.telegram_id }));
     }
     else if (action === 'seniorAdd') {
       // Старший бариста добавляет стажёров только на свою локацию
