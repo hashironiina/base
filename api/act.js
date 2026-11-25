@@ -273,6 +273,14 @@ function buildKnowledgeDoc({ sections, articles, tz }) {
   };
 }
 
+// Все локации старшего бариста: основная и дополнительные
+async function myLocIds(me) {
+  const ids = me.location_id ? [me.location_id] : [];
+  const r = await db.from('user_locations').select('location_id').eq('telegram_id', me.telegram_id);
+  if (!r.error) r.data.forEach((x) => { if (!ids.includes(x.location_id)) ids.push(x.location_id); });
+  return ids;
+}
+
 // Снимок текущей версии статьи для истории
 const snapRow = (cur, me) => ({
   article_id: cur.id, replaced_by: me.telegram_id, section_id: cur.section_id, title: cur.title,
@@ -454,9 +462,10 @@ module.exports = async (req, res) => {
     // Старший бариста: только свои действия и только в рамках своей локации
     let scope = null;
     if (me.role === 'senior' && ['progress', 'exportResults', 'seniorTrainees', 'seniorAdd'].includes(action)) {
-      if (!me.location_id) throw new Error('Тебе пока не назначена локация. Напиши шеф-баристе');
-      const people = chk(await db.from('users').select('telegram_id,name,role,stage,location_id').eq('location_id', me.location_id)).data;
-      scope = { people, ids: people.map((p) => p.telegram_id) };
+      const locIds = await myLocIds(me);
+      if (!locIds.length) throw new Error('Тебе пока не назначена локация. Напиши шеф-баристе');
+      const people = chk(await db.from('users').select('telegram_id,name,role,stage,location_id').in('location_id', locIds)).data;
+      scope = { people, ids: people.map((p) => p.telegram_id), locIds };
     } else if (me.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
 
     const out = { ok: 1 };
@@ -505,8 +514,7 @@ module.exports = async (req, res) => {
     else if (action === 'seniorTrainees') {
       if (!scope) throw new Error('Только для старшего бариста');
       out.items = scope.people.filter((p) => p.role === 'trainee');
-      const l = chk(await db.from('locations').select('name').eq('id', me.location_id)).data[0];
-      out.location = l ? l.name : '';
+      out.locations = chk(await db.from('locations').select('id,name').in('id', scope.locIds)).data;
     }
     else if (action === 'seniorAdd') {
       // Старший бариста добавляет стажёров только на свою локацию
@@ -514,11 +522,17 @@ module.exports = async (req, res) => {
       const id = Number(d.telegram_id);
       const name = String(d.name || '').trim().slice(0, 80);
       if (!id || !name) throw new Error('Нужны имя и Telegram ID (число)');
+      let locId = Number(d.location_id) || null;
+      if (!locId) {
+        if (scope.locIds.length === 1) locId = scope.locIds[0];
+        else throw new Error('Выбери локацию для стажёра');
+      }
+      if (!scope.locIds.includes(locId)) throw new Error('Эта локация тебе не назначена');
       const ex = chk(await db.from('users').select('telegram_id,role,location_id').eq('telegram_id', id)).data[0];
       if (ex && ex.role !== 'trainee') throw new Error('Этот человек уже есть в списке с другой ролью');
-      if (ex && ex.location_id && ex.location_id !== me.location_id) throw new Error('Этот стажёр уже прикреплён к другой локации');
-      chk(await db.from('users').upsert({ telegram_id: id, name, role: 'trainee', location_id: me.location_id }));
-      const l = chk(await db.from('locations').select('name').eq('id', me.location_id)).data[0];
+      if (ex && ex.location_id && !scope.locIds.includes(ex.location_id)) throw new Error('Этот стажёр уже прикреплён к другой локации');
+      chk(await db.from('users').upsert({ telegram_id: id, name, role: 'trainee', location_id: locId }));
+      const l = chk(await db.from('locations').select('name').eq('id', locId)).data[0];
       const admins = chk(await db.from('users').select('telegram_id,name').eq('role', 'admin')).data;
       await broadcast(admins, '👤 ' + me.name + ' (старший бариста) добавил(а) стажёра ' + name + (l ? ' на локацию «' + l.name + '»' : ''), appUrl);
     }
@@ -688,6 +702,8 @@ module.exports = async (req, res) => {
       // Локации (если таблица ещё не создана, список просто пустой)
       const lr = await db.from('locations').select('id,name').order('sort_order').order('name');
       out.locations = lr.error ? [] : lr.data;
+      const ur = await db.from('user_locations').select('telegram_id,location_id');
+      out.extras = ur.error ? [] : ur.data;
     }
     else if (action === 'saveUser') chk(await db.from('users').upsert({
       telegram_id: Number(d.telegram_id), name: d.name,
@@ -695,10 +711,25 @@ module.exports = async (req, res) => {
       ...(Number(d.location_id) ? { location_id: Number(d.location_id) } : {}),
     }));
     else if (action === 'setLocation') chk(await db.from('users').update({ location_id: Number(d.location_id) || null }).eq('telegram_id', d.telegram_id));
+    else if (action === 'userLocAdd') {
+      const u = chk(await db.from('users').select('telegram_id,role,location_id').eq('telegram_id', d.telegram_id)).data[0];
+      if (!u || u.role !== 'senior') throw new Error('Дополнительные локации можно добавлять только старшему бариста');
+      const loc = Number(d.location_id);
+      if (!loc) throw new Error('Выбери локацию');
+      if (u.location_id === loc) throw new Error('Это уже его основная локация');
+      chk(await db.from('user_locations').upsert({ telegram_id: u.telegram_id, location_id: loc }));
+    }
+    else if (action === 'userLocRemove') chk(await db.from('user_locations').delete().eq('telegram_id', d.telegram_id).eq('location_id', d.location_id));
     else if (action === 'locList') {
       const locs = chk(await db.from('locations').select('id,name,sort_order').order('sort_order').order('name')).data;
       const us = chk(await db.from('users').select('telegram_id,name,location_id')).data;
-      out.items = locs.map((l) => ({ ...l, people: us.filter((u) => u.location_id === l.id).map((u) => u.name) }));
+      const urr = await db.from('user_locations').select('telegram_id,location_id');
+      const extra = urr.error ? [] : urr.data;
+      out.items = locs.map((l) => ({
+        ...l,
+        people: us.filter((u) => u.location_id === l.id).map((u) => u.name).concat(
+          extra.filter((e) => e.location_id === l.id).map((e) => { const u = us.find((x) => x.telegram_id === e.telegram_id); return u ? u.name + ' (доп.)' : null; }).filter(Boolean)),
+      }));
       out.unassigned = us.filter((u) => !u.location_id).length;
     }
     else if (action === 'locSave') {
@@ -715,7 +746,9 @@ module.exports = async (req, res) => {
     else if (action === 'locDelete') {
       // Защита: нельзя удалить локацию, к которой прикреплены сотрудники
       const n = chk(await db.from('users').select('telegram_id').eq('location_id', d.id)).data.length;
-      if (n > 0) throw new Error('К этой локации прикреплено сотрудников: ' + n + '. Сначала переведи их в другую локацию в разделе «Люди»');
+      const exr = await db.from('user_locations').select('telegram_id').eq('location_id', d.id);
+      const m = exr.error ? 0 : exr.data.length;
+      if (n + m > 0) throw new Error('К этой локации прикреплено сотрудников: ' + (n + m) + '. Сначала переведи их в другую локацию в разделе «Люди»');
       chk(await db.from('locations').delete().eq('id', d.id));
     }
     else if (action === 'setRole') {
@@ -759,7 +792,9 @@ module.exports = async (req, res) => {
       const nmap = {};
       chk(await db.from('users').select('telegram_id,name')).data.forEach((u) => { nmap[u.telegram_id] = u.name; });
       out.names = nmap;
-      out.trainees = chk(await db.from('users').select('telegram_id,name,stage').eq('role', 'trainee').order('name')).data;
+      const lrows = await db.from('locations').select('id,name');
+      out.locmap = lrows.error ? {} : Object.fromEntries(lrows.data.map((l) => [l.id, l.name]));
+      out.trainees = chk(await db.from('users').select('telegram_id,name,stage,location_id').eq('role', 'trainee').order('name')).data;
       out.articles = chk(await db.from('articles').select('id,title,stage').in('access', ['staff', 'all']).eq('draft', false).is('deleted_at', null).order('section_id').order('sort_order').order('id')).data;
       let attempts = [];
       for (let i = 0; ; i += 1000) {
