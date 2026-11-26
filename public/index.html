@@ -238,14 +238,24 @@ function seniorRow(){
 }
 async function myloc(){
   $.innerHTML=H+'Загрузка…';
-  const r=await act({action:'seniorTrainees'});
+  const r=await act({action:'seniorTrainees'});MYR=r;
   const L=r.locations||[],nm=id=>{const l=L.find(x=>x.id===id);return l?esc(l.name):''};
   $.innerHTML=H+'<h2>Моя локация</h2><p class=hint>📍 '+(L.map(l=>esc(l.name)).join(', ')||'—')+'</p>'+
     `<div class=card style="cursor:default"><b>Добавить стажёра</b><input id=sn1 placeholder="Имя"><input id=si1 placeholder="Telegram ID (число)" inputmode=numeric>${L.length>1?`<select id=sl1>${L.map(l=>`<option value=${l.id}>📍 ${esc(l.name)}</option>`).join('')}</select>`:''}<div class=row><button class=main onclick="addTrainee()">Добавить</button></div><small class=hint>Стажёр начнёт с этапа 1. Свой ID он узнаёт у бота @userinfobot. Результаты тестов и прогресс: кнопка «Прогресс стажёров».</small></div>`+
     `<h3>Стажёры (${r.items.length})</h3>`+
-    (r.items.map(t=>`<div class=card style="cursor:default"><b>${esc(t.name)}</b> — этап ${t.stage}${L.length>1&&nm(t.location_id)?' · 📍 '+nm(t.location_id):''}<br><small class=hint>${t.telegram_id}</small></div>`).join('')||'<p class=hint>Стажёров пока нет.</p>')+
+    (r.items.map((t,i)=>`<div class=card style="cursor:default"><b>${esc(t.name)}</b> — этап ${t.stage}${L.length>1&&nm(t.location_id)?' · 📍 '+nm(t.location_id):''}<br><small class=hint>${t.telegram_id}</small><div class=row><button onclick="detachAt('t',${i})">Убрать с локации</button></div></div>`).join('')||'<p class=hint>Стажёров пока нет.</p>')+
     `<h3>Бариста (${(r.staff||[]).length})</h3>`+
-    ((r.staff||[]).map(x=>`<div class=card style="cursor:default"><b>${esc(x.name)}</b>${x.me?' (ты)':''}${x.role==='senior'?' · <i>старший бариста</i>':''}${L.length>1?'<br><small class=hint>📍 '+x.locs.map(nm).filter(Boolean).join(', ')+'</small>':''}</div>`).join('')||'<p class=hint>Других бариста на твоих локациях пока нет.</p>');
+    ((r.staff||[]).map((x,i)=>`<div class=card style="cursor:default"><b>${esc(x.name)}</b>${x.me?' (ты)':''}${x.role==='senior'?' · <i>старший бариста</i>':''}${L.length>1?'<br><small class=hint>📍 '+x.locs.map(nm).filter(Boolean).join(', ')+'</small>':''}${x.id?`<div class=row><button onclick="detachAt('s',${i})">Убрать с локации</button></div>`:''}</div>`).join('')||'<p class=hint>Других бариста на твоих локациях пока нет.</p>');
+}
+let MYR=null;
+function detachAt(kind,i){
+  const x=kind==='t'?MYR.items[i]:MYR.staff[i];
+  const id=kind==='t'?x.telegram_id:x.id;
+  tg.showConfirm('Убрать «'+x.name+'» с локации? Человек останется в приложении без локации, его результаты сохранятся.',async ok=>{
+    if(!ok)return;
+    await act({action:'seniorDetach',telegram_id:id});
+    myloc();
+  });
 }
 async function addTrainee(){
   const n=document.getElementById('sn1').value.trim(),i=document.getElementById('si1').value.trim(),s=document.getElementById('sl1');
