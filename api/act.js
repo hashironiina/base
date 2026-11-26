@@ -461,7 +461,7 @@ module.exports = async (req, res) => {
     // Всё остальное только для редакторов
     // Старший бариста: только свои действия и только в рамках своей локации
     let scope = null;
-    if (me.role === 'senior' && ['progress', 'exportResults', 'seniorTrainees', 'seniorAdd'].includes(action)) {
+    if (me.role === 'senior' && ['progress', 'exportResults', 'seniorTrainees', 'seniorAdd', 'seniorDetach'].includes(action)) {
       const locIds = await myLocIds(me);
       if (!locIds.length) throw new Error('Тебе пока не назначена локация. Напиши шеф-баристе');
       const people = chk(await db.from('users').select('telegram_id,name,role,stage,location_id').in('location_id', locIds)).data;
@@ -530,7 +530,18 @@ module.exports = async (req, res) => {
         });
       }
       staff.sort((a, b) => (a.role === b.role ? 0 : a.role === 'senior' ? -1 : 1) || a.name.localeCompare(b.name, 'ru'));
-      out.staff = staff.map((x) => ({ name: x.name, role: x.role, locs: x.locs, me: x.telegram_id === me.telegram_id }));
+      out.staff = staff.map((x) => ({ name: x.name, role: x.role, locs: x.locs, me: x.telegram_id === me.telegram_id, id: x.role === 'reader' ? x.telegram_id : undefined }));
+    }
+    else if (action === 'seniorDetach') {
+      // Старший бариста убирает бариста или стажёра со своей локации. Человек НЕ удаляется:
+      // он остаётся в приложении без локации, все его результаты сохраняются
+      if (!scope) throw new Error('Только для старшего бариста');
+      const t = scope.people.find((p) => p.telegram_id === Number(d.telegram_id) && (p.role === 'trainee' || p.role === 'reader'));
+      if (!t) throw new Error('Сотрудник не найден на твоих локациях (убрать можно только бариста и стажёров)');
+      chk(await db.from('users').update({ location_id: null }).eq('telegram_id', t.telegram_id));
+      const l = chk(await db.from('locations').select('name').eq('id', t.location_id)).data[0];
+      const admins = chk(await db.from('users').select('telegram_id,name').eq('role', 'admin')).data;
+      await broadcast(admins, '➖ ' + me.name + ' (старший бариста) убрал(а) с локации' + (l ? ' «' + l.name + '»' : '') + ' сотрудника ' + t.name + '. Он остался в приложении без локации', appUrl);
     }
     else if (action === 'seniorAdd') {
       // Старший бариста добавляет стажёров только на свою локацию
